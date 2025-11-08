@@ -8,13 +8,13 @@ inputs:
     description: "Token for MLflow/DagsHub"
     required: true
   gist_id:
-    description: "Optional: Gist ID to store commitHistory.csv"
+    description: "Gist ID to store commitHistory.csv"
     required: false
   gist_token:
     description: "Token with gist scope (passed from workflow)"
     required: false
   gist_filename:
-    description: "Optional: filename in the Gist (default commitHistory.csv)"
+    description: "filename in the Gist (default commitHistory.csv)"
     required: false
     default: "commitHistory.csv"
   use_gomlops:
@@ -46,7 +46,7 @@ runs:
         python -m pip install --upgrade pip
         pip install mlflow pandas matplotlib requests
 
-    # (Optional) pull the latest CSV from Gist so append works on top
+    # pull the latest CSV from Gist so append works on top
     - name: (Gist) Pull existing CSV
       if: ${{ inputs.gist_id != '' }}
       shell: bash
@@ -73,8 +73,16 @@ runs:
     - name: Detect cause (Data/Script/None)
       shell: bash
       run: |
-        chmod +x .github/scripts/detect_cause_mlops.sh
-        .github/scripts/detect_cause_mlops.sh
+        echo "Repo root contents:" && ls -la
+        echo ".github/scripts contents:" && ls -la .github/scripts || true
+
+        if [ -f ".github/scripts/detect_cause_mlops.sh" ]; then
+          chmod +x .github/scripts/detect_cause_mlops.sh || true
+          bash .github/scripts/detect_cause_mlops.sh
+        else
+          echo "::warning:: .github/scripts/detect_cause_mlops.sh not found; defaulting CAUSE_MLOPS=None"
+          echo "CAUSE_MLOPS=None" >> "$GITHUB_ENV"
+        fi
 
     - name: Extract MLflow metrics/params/version
       id: mlflow
