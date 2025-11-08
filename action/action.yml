@@ -1,0 +1,144 @@
+name: "mlops-plugin"
+description: "Links each commit to its MLflow run, renders a Summary report, and records results in a Gist CSV ledger."
+inputs:
+  mlflow_tracking_uri:
+    description: "MLflow tracking URI (e.g., DagsHub MLflow)"
+    required: true
+  mlflow_token:
+    description: "Token for MLflow/DagsHub"
+    required: true
+  gist_id:
+    description: "Optional: Gist ID to store commitHistory.csv"
+    required: false
+  gist_filename:
+    description: "Optional: filename in the Gist (default commitHistory.csv)"
+    required: false
+    default: "commitHistory.csv"
+  use_gomlops:
+    description: "Optional: use external GoMLOps detector"
+    required: false
+    default: "false"
+  gomlops_version:
+    description: "Optional: GoMLOps version/commit"
+    required: false
+    default: "latest"
+  trained_this_run:
+    description: "Set true if the job trained a new model this run"
+    required: false
+    default: "false"
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Python deps
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install mlflow pandas matplotlib requests
+
+    # (Optional) pull the latest CSV from Gist so append works on top
+    - name: (Optional) Pull CSV from Gist
+      if: ${{ inputs.gist_id != '' }}
+      shell: bash
+      env:
+        GIST_ID: ${{ inputs.gist_id }}
+        GIST_FILENAME: ${{ inputs.gist_filename }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        echo "Fetching $GIST_FILENAME from gist:$GIST_ID (if exists)..."
+        gh api /gists/${GIST_ID} --jq ".files[\"${GIST_FILENAME}\"].raw_url" > raw_url.txt || true
+        RAW_URL="$(cat raw_url.txt || true)"
+        if [[ -n "${RAW_URL:-}" && "${RAW_URL}" != "null" ]]; then
+          curl -sSL "$RAW_URL" -o commitHistory.csv || true
+          echo "Pulled existing CSV from Gist."
+        else
+          echo "No existing CSV in Gist; will create a new one."
+        fi
+
+    - name: Detect cause (Data/Script/None)
+      shell: bash
+      run: |
+        chmod +x .github/scripts/detect_cause_mlops.sh
+        .github/scripts/detect_cause_mlops.sh
+
+    - name: Extract MLflow metrics/params/version
+      id: mlflow
+      shell: bash
+      env:
+        MLFLOW_TRACKING_URI: ${{ inputs.mlflow_tracking_uri }}
+        MLFLOW_TOKEN: ${{ inputs.mlflow_token }}
+        TRAINED_THIS_RUN: ${{ inputs.trained_this_run }}
+      run: |
+        python .github/scripts/extract_mlflow.py
+
+    - name: Render val_accuracy chart
+      shell: bash
+      run: |
+        python .github/scripts/render_val_accuracy_svg.py || true
+
+    - name: Generate Summary markdown
+      shell: bash
+      run: |
+        python .github/scripts/generate_summary_md.py > SUMMARY.md
+
+    - name: Append to commitHistory.csv (local)
+      shell: bash
+      env:
+        TRAINED: ${{ inputs.trained_this_run }}
+        # pass-through of outputs written by extract_mlflow.py
+        ACCURACY: ${{ steps.mlflow.outputs.accuracy }}
+        LOSS: ${{ steps.mlflow.outputs.loss }}
+        VAL_ACCURACY: ${{ steps.mlflow.outputs.val_accuracy }}
+        VAL_LOSS: ${{ steps.mlflow.outputs.val_loss }}
+        TRAIN_DUR: ${{ steps.mlflow.outputs.training_duration }}
+        MODEL_VERSION: ${{ steps.mlflow.outputs.model_version }}
+        EPOCHS: ${{ steps.mlflow.outputs.epochs }}
+        OPT_NAME: ${{ steps.mlflow.outputs.opt_name }}
+        OPT_LR: ${{ steps.mlflow.outputs.opt_lr }}
+        MONITOR: ${{ steps.mlflow.outputs.monitor }}
+        PATIENCE: ${{ steps.mlflow.outputs.patience }}
+        RESTORE_BEST_WEIGHTS: ${{ steps.mlflow.outputs.restore_best_weights }}
+        RUN_ID: ${{ steps.mlflow.outputs.run_id }}
+      run: |
+        python .github/scripts/append_commitHistory.py
+
+    - name: (Optional) Push CSV to Gist
+      if: ${{ inputs.gist_id != '' }}
+      shell: bash
+      env:
+        GIST_ID: ${{ inputs.gist_id }}
+        GIST_FILENAME: ${{ inputs.gist_filename }}
+        GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+      run: |
+        set -euo pipefail
+        echo "Uploading commitHistory.csv to gist:$GIST_ID as $GIST_FILENAME ..."
+        payload=$(jq -n --arg fn "$GIST_FILENAME" --rawfile content commitHistory.csv '{files: {($fn): {content: $content}}}')
+        curl -sS -X PATCH \
+          -H "Authorization: Bearer ${GIST_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d "$payload" \
+          "https://api.github.com/gists/${GIST_ID}" >/dev/null
+        echo "Gist updated."
+
+    - name: Post Summary
+      shell: bash
+      run: |
+        echo "### MLOps Summary" >> $GITHUB_STEP_SUMMARY
+        cat SUMMARY.md >> $GITHUB_STEP_SUMMARY
+
+    - name: (Optional) Prune old MLflow runs
+      if: ${{ inputs.trained_this_run == 'true' }}
+      shell: bash
+      env:
+        MLFLOW_TRACKING_URI: ${{ inputs.mlflow_tracking_uri }}
+        MLFLOW_TOKEN: ${{ inputs.mlflow_token }}
+      run: |
+        python .github/scripts/prune_mlflow_runs.py || true
