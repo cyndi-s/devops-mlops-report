@@ -28,10 +28,11 @@ def write_outputs(d):
             f.write(f"{k}={v}\n")
 
 def get_default_experiment(client: MlflowClient):
-    # Your experiment name is guaranteed to be "Default"
-    exp = mlflow.get_experiment_by_name("Default")
+    try:
+        exp = mlflow.get_experiment_by_name("Default")
+    except Exception:
+        exp = None
     if exp is None:
-        # fallback to the built-in default experiment id "0"
         try:
             exp = client.get_experiment("0")
         except Exception:
@@ -41,12 +42,15 @@ def get_default_experiment(client: MlflowClient):
 def latest_run_id(client: MlflowClient):
     exp = get_default_experiment(client)
     if not exp:
+        return ""  # graceful: no experiment yet
+    try:
+        runs = client.search_runs(
+            experiment_ids=[exp.experiment_id],
+            max_results=1,
+            order_by=["attributes.start_time DESC"],
+        )
+    except Exception:
         return ""
-    runs = client.search_runs(
-        experiment_ids=[exp.experiment_id],
-        max_results=1,
-        order_by=["attributes.start_time DESC"],
-    )
     return runs[0].info.run_id if runs else ""
 
 client = MlflowClient()
