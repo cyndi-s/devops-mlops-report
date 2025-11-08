@@ -10,6 +10,9 @@ inputs:
   gist_id:
     description: "Optional: Gist ID to store commitHistory.csv"
     required: false
+  gist_token:
+    description: "Token with gist scope (passed from workflow)"
+    required: false
   gist_filename:
     description: "Optional: filename in the Gist (default commitHistory.csv)"
     required: false
@@ -50,18 +53,19 @@ runs:
       env:
         GIST_ID: ${{ inputs.gist_id }}
         GIST_FILENAME: ${{ inputs.gist_filename }}
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ inputs.gist_token }}
       run: |
-        set -euo pipefail
-        echo "Fetching $GIST_FILENAME from gist:$GIST_ID (if exists)..."
-        gh api /gists/${GIST_ID} --jq ".files[\"${GIST_FILENAME}\"].raw_url" > raw_url.txt || true
-        RAW_URL="$(cat raw_url.txt || true)"
-        if [[ -n "${RAW_URL:-}" && "${RAW_URL}" != "null" ]]; then
-          curl -sSL "$RAW_URL" -o commitHistory.csv || true
-          echo "Pulled existing CSV from Gist."
-        else
-          echo "No existing CSV in Gist; will create a new one."
-        fi
+          set -euo pipefail
+          if [ -z "${GIST_TOKEN:-}" ]; then
+            echo "::error::gist_token input missing. Pass secrets.GIST_TOKEN from the workflow."; exit 1
+          fi
+          payload=$(jq -n --arg fn "$GIST_FILENAME" --rawfile content commitHistory.csv '{files: {($fn): {content: $content}}}')
+          curl -sS -X PATCH \
+            -H "Authorization: Bearer ${GIST_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "https://api.github.com/gists/${GIST_ID}" >/dev/null
+          echo "Gist updated."
 
     - name: Detect cause (Data/Script/None)
       shell: bash
