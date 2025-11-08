@@ -1,0 +1,23 @@
+name: mlops-plugin self-test
+on:
+  push:
+  pull_request:
+
+jobs:
+  mlops:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run mlops-plugin (composite)
+        uses: ./action
+        with:
+          mlflow_tracking_uri: ${{ secrets.MLFLOW_TRACKING_URI }}
+          mlflow_token: ${{ secrets.MLFLOW_TOKEN }}
+          gist_id: ${{ vars.GIST_ID }}               # optional
+          gist_filename: commitHistory.csv           # optional
+          trained_this_run: "false"                  # set "true" if the job trained models
