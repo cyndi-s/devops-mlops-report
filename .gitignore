@@ -1,0 +1,71 @@
+# --- OS / Editors ---
+.DS_Store
+._*
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+pip-wheel-metadata/
+.ipynb_checkpoints/
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+
+# --- Node (examples or adopters) ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# --- Logs / caches ---
+*.log
+.cache/
+
+# --- MLflow (local) ---
+mlruns/
+mlartifacts/
+
+# --- Data / large artifacts (keep repo light) ---
+data/
+datasets/
+artifacts/
+outputs/
+
+# --- CSV ledgers kept in Gist, not repo ---
+commitHistory.csv
+commitHistory-*.csv
+
+# --- Secrets & local config ---
+.env
+*.env
+!*.env.example   # keep example envs tracked
+
+# --- Archives / binaries ---
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+*.bz2
+*.7z
+*.bin
+*.exe
+
+
+# --- Others ---
+guideline.md
