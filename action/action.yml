@@ -47,25 +47,28 @@ runs:
         pip install mlflow pandas matplotlib requests
 
     # (Optional) pull the latest CSV from Gist so append works on top
-    - name: (Optional) Pull CSV from Gist
+    - name: (Gist) Pull existing CSV
       if: ${{ inputs.gist_id != '' }}
       shell: bash
       env:
-        GIST_ID: ${{ inputs.gist_id }}
+        GIST_ID:       ${{ inputs.gist_id }}
         GIST_FILENAME: ${{ inputs.gist_filename }}
-        GITHUB_TOKEN: ${{ inputs.gist_token }}
+        GIST_TOKEN:    ${{ inputs.gist_token }}
       run: |
-          set -euo pipefail
-          if [ -z "${GIST_TOKEN:-}" ]; then
-            echo "::error::gist_token input missing. Pass secrets.GIST_TOKEN from the workflow."; exit 1
-          fi
-          payload=$(jq -n --arg fn "$GIST_FILENAME" --rawfile content commitHistory.csv '{files: {($fn): {content: $content}}}')
-          curl -sS -X PATCH \
-            -H "Authorization: Bearer ${GIST_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            "https://api.github.com/gists/${GIST_ID}" >/dev/null
-          echo "Gist updated."
+        set -euo pipefail
+        echo "Fetching $GIST_FILENAME from gist:$GIST_ID (if present)..."
+        if [ -z "${GIST_TOKEN:-}" ]; then
+          echo "No gist_token provided; cannot read a secret Gist. Continuing without prefetch."
+          exit 0
+        fi
+        RESP=$(curl -sS -H "Authorization: Bearer ${GIST_TOKEN}" "https://api.github.com/gists/${GIST_ID}")
+        FILE_NAME=$(jq -r --arg fn "$GIST_FILENAME" '.files[$fn].filename // empty' <<<"$RESP")
+        if [ -n "$FILE_NAME" ]; then
+          jq -r --arg fn "$GIST_FILENAME" '.files[$fn].content' <<<"$RESP" > commitHistory.csv || true
+          echo "Pulled $GIST_FILENAME from Gist."
+        else
+          echo "File $GIST_FILENAME not found in Gist; will create it on push."
+        fi
 
     - name: Detect cause (Data/Script/None)
       shell: bash
@@ -114,23 +117,28 @@ runs:
       run: |
         python .github/scripts/append_commitHistory.py
 
-    - name: (Optional) Push CSV to Gist
+    - name: (Gist) Push CSV to Gist
       if: ${{ inputs.gist_id != '' }}
       shell: bash
       env:
-        GIST_ID: ${{ inputs.gist_id }}
+        GIST_ID:       ${{ inputs.gist_id }}
         GIST_FILENAME: ${{ inputs.gist_filename }}
-        GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        GIST_TOKEN:    ${{ inputs.gist_token }}
       run: |
         set -euo pipefail
-        echo "Uploading commitHistory.csv to gist:$GIST_ID as $GIST_FILENAME ..."
+        if [ -z "${GIST_TOKEN:-}" ]; then
+          echo "::error::gist_token input missing. Pass secrets.GIST_TOKEN from the workflow."; exit 1
+        fi
+        if [ ! -s commitHistory.csv ]; then
+          echo "::error::commitHistory.csv not found/empty before push."; exit 1
+        fi
         payload=$(jq -n --arg fn "$GIST_FILENAME" --rawfile content commitHistory.csv '{files: {($fn): {content: $content}}}')
         curl -sS -X PATCH \
           -H "Authorization: Bearer ${GIST_TOKEN}" \
           -H "Content-Type: application/json" \
           -d "$payload" \
           "https://api.github.com/gists/${GIST_ID}" >/dev/null
-        echo "Gist updated."
+        echo "Gist updated: $GIST_FILENAME"
 
     - name: Post Summary
       shell: bash
