@@ -20,4 +20,5 @@ jobs:
           mlflow_token: ${{ secrets.MLFLOW_TOKEN }}
           gist_id: ${{ vars.GIST_ID }}               # optional
           gist_filename: commitHistory.csv           # optional
+          gist_token: ${{ secrets.GIST_TOKEN }}
           trained_this_run: "false"                  # set "true" if the job trained models
