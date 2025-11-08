@@ -69,3 +69,7 @@ commitHistory-*.csv
 
 # --- Others ---
 guideline.md
+
+# allow committed examples and safe defaults
+!config/*.env.example
+!plugin/defaults.env
