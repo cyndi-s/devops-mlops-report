@@ -1,52 +1,58 @@
 #!/usr/bin/env python3
-import os, csv, statistics as stats
-from pathlib import Path
+import os
+import pandas as pd
+import matplotlib.pyplot as plt
 
-CSV_FILE = Path("commitHistory.csv")
-SVG_OUT = Path("val_accuracy.svg")
-MAX_ROWS = 50  # visualize the most recent N rows
+os.makedirs(".mlops", exist_ok=True)
 
-def read_vals():
-    if not CSV_FILE.exists():
-        return []
-    vals = []
-    with open(CSV_FILE, newline="", encoding="utf-8") as f:
-        r = csv.DictReader(f)
-        for row in r:
-            try:
-                v = float(row.get("val_accuracy", "") or "")
-                vals.append(v)
-            except Exception:
-                continue
-    return vals[-MAX_ROWS:]
+# Find CSV
+csv_candidates = [".mlops/commitHistory.csv", "artifacts/commitHistory.csv", "commitHistory.csv"]
+csv_path = next((p for p in csv_candidates if os.path.exists(p)), None)
+if not csv_path:
+    print("No commit history found; skipping chart.")
+    raise SystemExit(0)
 
-def normalize(vs):
-    if not vs: return []
-    lo, hi = min(vs), max(vs)
-    if hi == lo: return [0.5 for _ in vs]
-    return [(v - lo) / (hi - lo) for v in vs]
+df = pd.read_csv(csv_path)
+if "val_acc" in df.columns and "val_accuracy" not in df.columns:
+    df["val_accuracy"] = pd.to_numeric(df["val_acc"], errors="coerce")
 
-def moving_avg(vs, k=5):
-    if not vs: return []
-    out=[]
-    for i in range(len(vs)):
-        s = vs[max(0, i-k+1):i+1]
-        out.append(sum(s)/len(s))
-    return out
+if "val_accuracy" not in df.columns:
+    print("No val_accuracy column; skipping chart.")
+    raise SystemExit(0)
 
-def points_to_svg(points, w, h, pad=20):
-    if not points: 
-        return f'<svg width="{w}" height="{h}" xmlns="http://www.w3.org/2000/svg"><text x="10" y="20">No data</text></svg>'
-    n = len(points)
-    xs = [pad + (i*(w-2*pad)/(n-1)) for i in range(n)]
-    ys = [pad + (1-p)*(h-2*pad) for p in points]
-    path = "M " + " L ".join(f"{x:.1f} {y:.1f}" for x,y in zip(xs, ys))
-    return f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg"><path d="{path}" fill="none" stroke="black" stroke-width="2"/><text x="{pad}" y="{h-pad/2}" font-size="10">val_accuracy (last {n})</text></svg>'
+# Sort by time if available
+time_col = None
+for c in ["Timestamp (Toronto)","timestamp","start_time","datetime","time"]:
+    if c in df.columns:
+        time_col = c
+        break
+if time_col:
+    try:
+        df["_t"] = pd.to_datetime(df[time_col], errors="coerce")
+        df = df.sort_values("_t")
+    except Exception:
+        pass
 
-vals = read_vals()
-norm = normalize(vals)
-avg = moving_avg(norm)
+y = pd.to_numeric(df["val_accuracy"], errors="coerce")
+x = range(len(y))
 
-svg = points_to_svg(avg if avg else norm, 640, 240)
-SVG_OUT.write_text(svg, encoding="utf-8")
-print(f"Wrote {SVG_OUT} (n={len(vals)})")
+# Compute 3-run MA
+ma3 = y.rolling(3).mean()
+median = y.median()
+
+# Plot
+plt.figure()
+plt.plot(x, y, marker="o", label="val_accuracy")
+plt.axhline(median, linestyle="--", label="Median")
+plt.plot(x, ma3, linestyle=":", label="3-run MA")
+plt.legend()
+plt.xlabel("Run # (old → new)")
+plt.ylabel("val_accuracy")
+plt.title("Model Performance")
+
+# Save both
+svg_path = ".mlops/val_accuracy.svg"
+png_path = ".mlops/val_accuracy.png"
+plt.savefig(svg_path, bbox_inches="tight")
+plt.savefig(png_path, bbox_inches="tight")
+print(f"Wrote {svg_path} and {png_path}")

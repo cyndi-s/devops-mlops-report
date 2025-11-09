@@ -103,6 +103,7 @@ runs:
       shell: bash
       run: |
         python .github/scripts/generate_summary_md.py > SUMMARY.md
+        cat SUMMARY.md >> $GITHUB_STEP_SUMMARY
 
     - name: Append to commitHistory.csv (local)
       shell: bash
