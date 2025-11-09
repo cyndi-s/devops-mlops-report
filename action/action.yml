@@ -54,6 +54,10 @@ runs:
   using: "composite"
   steps:
 
+    - name: Init TRAINED_THIS_RUN
+      shell: bash
+      run: echo "TRAINED_THIS_RUN=false" >> "$GITHUB_ENV"
+
     - name: Ensure MLflow is installed
       if: ${{ inputs.train == 'true' && inputs.install_mlflow == 'true' }}
       run: |
@@ -62,7 +66,7 @@ runs:
       shell: bash
 
     - name: Train with MLflow (caller repo)
-      if: ${{ inputs.train == 'true' || (inputs.train != 'false' && env.CAUSE_MLOPS != 'None') }}
+      if: ${{ (inputs.train == 'true' || (inputs.train != 'false' && env.CAUSE_MLOPS != 'None')) && hashFiles('MLproject') != '' }}
       shell: bash
       env:
         MLFLOW_TRACKING_URI:       ${{ inputs.mlflow_tracking_uri }}
