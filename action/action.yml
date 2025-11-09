@@ -29,62 +29,58 @@ inputs:
     description: "Set true if the job trained a new model this run"
     required: false
     default: "false"
+  train:
+    description: "Run MLproject training in the caller workspace"
+    required: false
+    default: "true"
+  mlproject_entrypoint:
+    description: "MLproject entry point"
+    required: false
+    default: "main"
+  env_manager:
+    description: "MLflow env manager (local|virtualenv|conda)"
+    required: false
+    default: "local"
+  mlflow_username:
+    description: "MLflow username (optional for DagsHub)"
+    required: false
+    default: ""
+  install_mlflow:
+    description: "pip install mlflow before training"
+    required: false
+    default: "true"
+    
 runs:
   using: "composite"
   steps:
-    - name: Checkout
-      uses: actions/checkout@v4
 
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install Python deps
-      shell: bash
+    - name: Ensure MLflow is installed
+      if: ${{ inputs.train == 'true' && inputs.install_mlflow == 'true' }}
       run: |
         python -m pip install --upgrade pip
-        pip install mlflow pandas matplotlib requests
+        pip install "mlflow>=2.4"
+      shell: bash
 
-    # pull the latest CSV from Gist so append works on top
-    - name: (Gist) Pull existing CSV
-      if: ${{ inputs.gist_id != '' }}
+    - name: Train with MLflow (caller repo)
+      if: ${{ inputs.train == 'true' || (inputs.train != 'false' && env.CAUSE_MLOPS != 'None') }}
       shell: bash
       env:
-        GIST_ID:       ${{ inputs.gist_id }}
-        GIST_FILENAME: ${{ inputs.gist_filename }}
-        GIST_TOKEN:    ${{ inputs.gist_token }}
+        MLFLOW_TRACKING_URI:       ${{ inputs.mlflow_tracking_uri }}
+        MLFLOW_TRACKING_USERNAME:  ${{ inputs.mlflow_username }}
+        MLFLOW_TRACKING_PASSWORD:  ${{ inputs.mlflow_token }}
       run: |
-        set -euo pipefail
-        echo "Fetching $GIST_FILENAME from gist:$GIST_ID (if present)..."
-        if [ -z "${GIST_TOKEN:-}" ]; then
-          echo "No gist_token provided; cannot read a secret Gist. Continuing without prefetch."
-          exit 0
-        fi
-        RESP=$(curl -sS -H "Authorization: Bearer ${GIST_TOKEN}" "https://api.github.com/gists/${GIST_ID}")
-        FILE_NAME=$(jq -r --arg fn "$GIST_FILENAME" '.files[$fn].filename // empty' <<<"$RESP")
-        if [ -n "$FILE_NAME" ]; then
-          jq -r --arg fn "$GIST_FILENAME" '.files[$fn].content' <<<"$RESP" > commitHistory.csv || true
-          echo "Pulled $GIST_FILENAME from Gist."
-        else
-          echo "File $GIST_FILENAME not found in Gist; will create it on push."
-        fi
+        mlflow run . -e "${{ inputs.mlproject_entrypoint }}" --env-manager="${{ inputs.env_manager }}"
+        echo "TRAINED_THIS_RUN=true" >> "$GITHUB_ENV"
+      
 
-    - name: Detect cause (Data/Script/None)
+    - name: Detect cause (Data/Script/Both|None)
       shell: bash
       run: |
-        echo "Repo root contents:" && ls -la
-        echo ".github/scripts contents:" && ls -la .github/scripts || true
+        chmod +x "${{ github.action_path }}/../.github/scripts/detect_cause_mlops.sh"
+        "${{ github.action_path }}/../.github/scripts/detect_cause_mlops.sh"
+        echo "Detected CAUSE_MLOPS=$CAUSE_MLOPS"
 
-        if [ -f ".github/scripts/detect_cause_mlops.sh" ]; then
-          chmod +x .github/scripts/detect_cause_mlops.sh || true
-          bash .github/scripts/detect_cause_mlops.sh
-        else
-          echo "::warning:: .github/scripts/detect_cause_mlops.sh not found; defaulting CAUSE_MLOPS=None"
-          echo "CAUSE_MLOPS=None" >> "$GITHUB_ENV"
-        fi
-
-    - name: Extract MLflow metrics/params/version
+    - name: Extract MLflow info
       id: mlflow
       shell: bash
       env:
@@ -102,9 +98,17 @@ runs:
     - name: Generate Summary markdown
       shell: bash
       run: |
+        set -euo pipefail
+        echo "::notice:: action_path=${{ github.action_path }}"
         python "${{ github.action_path }}/../.github/scripts/generate_summary_md.py" > "$RUNNER_TEMP/summary.md"
+
+        # sanity checks so we stop guessing
+        test -s "$RUNNER_TEMP/summary.md" || { echo "::error:: summary.md not created"; exit 1; }
+        head -n 3 "$RUNNER_TEMP/summary.md" || true
+
         echo "mlops summary" >> "$GITHUB_STEP_SUMMARY"
         cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+        echo "::notice:: appended to Job Summary"
 
     - name: Append to commitHistory.csv (local)
       shell: bash
