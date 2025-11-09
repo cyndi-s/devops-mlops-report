@@ -24,14 +24,8 @@ jobs:
           # MLflow / DagsHub creds (used by extract steps; training is disabled here)
           mlflow_tracking_uri: ${{ secrets.MLFLOW_TRACKING_URI }}
           mlflow_token:        ${{ secrets.DAGSHUB_TOKEN }}
-
-          # Turn off training for this repo (no MLproject in plugin repo)
           train: 'false'
-
-          # Optional Gist ledger (enable if you have these set)
           gist_id:       ${{ vars.GIST_ID }}
           gist_filename: commitHistory.csv
           gist_token:    ${{ secrets.GIST_TOKEN }}
-
-          # For backward-compat only; ignored when train='false'
           trained_this_run: 'false'

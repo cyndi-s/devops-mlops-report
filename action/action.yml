@@ -57,13 +57,21 @@ runs:
     - name: Init TRAINED_THIS_RUN
       shell: bash
       run: echo "TRAINED_THIS_RUN=false" >> "$GITHUB_ENV"
+    
+    - name: Detect cause (Data/Script/Both/None)
+      shell: bash
+      run: |
+        chmod +x "${{ github.action_path }}/../.github/scripts/detect_cause_mlops.sh"
+        "${{ github.action_path }}/../.github/scripts/detect_cause_mlops.sh"
+        echo "Detected CAUSE_MLOPS=$CAUSE_MLOPS"
 
     - name: Ensure MLflow is installed
-      if: ${{ inputs.train == 'true' && inputs.install_mlflow == 'true' }}
+      if: ${{ inputs.install_mlflow != 'false' }}
+      shell: bash
       run: |
         python -m pip install --upgrade pip
         pip install "mlflow>=2.4"
-      shell: bash
+      
 
     - name: Train with MLflow (caller repo)
       if: ${{ (inputs.train == 'true' || (inputs.train != 'false' && env.CAUSE_MLOPS != 'None')) && hashFiles('MLproject') != '' }}
@@ -75,100 +83,40 @@ runs:
       run: |
         mlflow run . -e "${{ inputs.mlproject_entrypoint }}" --env-manager="${{ inputs.env_manager }}"
         echo "TRAINED_THIS_RUN=true" >> "$GITHUB_ENV"
-      
-
-    - name: Detect cause (Data/Script/Both|None)
-      shell: bash
-      run: |
-        chmod +x "${{ github.action_path }}/../.github/scripts/detect_cause_mlops.sh"
-        "${{ github.action_path }}/../.github/scripts/detect_cause_mlops.sh"
-        echo "Detected CAUSE_MLOPS=$CAUSE_MLOPS"
+    
 
     - name: Extract MLflow info
-      id: mlflow
+      id: ml
       shell: bash
       env:
         MLFLOW_TRACKING_URI: ${{ inputs.mlflow_tracking_uri }}
         MLFLOW_TOKEN: ${{ inputs.mlflow_token }}
         TRAINED_THIS_RUN: ${{ inputs.trained_this_run }}
       run: |
-        python .github/scripts/extract_mlflow.py
+          run: python "${{ github.action_path }}/../.github/scripts/extract_mlflow.py"
 
+
+    # 6) Append one row, then sort by timestamp ASC (no prepend)
+    - name: Append commitHistory.csv
+      shell: bash
+      env:
+        TRAINED_THIS_RUN: ${{ env.TRAINED_THIS_RUN }}
+      run: python "${{ github.action_path }}/../.github/scripts/append_commitHistory.py"
+
+    # 7) (Optional) Push updated CSV back to Gist
+    - name: (Gist) Push updated CSV
+      if: ${{ inputs.gist_id != '' && inputs.gist_token != '' }}
+      shell: bash
+      run: python "${{ github.action_path }}/../.github/scripts/append_commitHistory.py" --push-gist
+
+    # 8) Render chart (tolerant if CSV empty)
     - name: Render val_accuracy chart
       shell: bash
-      run: |
-        python .github/scripts/render_val_accuracy_svg.py || true
+      run: python "${{ github.action_path }}/../.github/scripts/render_val_accuracy_svg.py" || true
 
-    - name: Generate Summary markdown
+    # 9) Generate Summary (caller repo Job Summary)
+    - name: Generate Summary (Job Summary)
       shell: bash
       run: |
-        set -euo pipefail
-        echo "::notice:: action_path=${{ github.action_path }}"
         python "${{ github.action_path }}/../.github/scripts/generate_summary_md.py" > "$RUNNER_TEMP/summary.md"
-
-        # sanity checks so we stop guessing
-        test -s "$RUNNER_TEMP/summary.md" || { echo "::error:: summary.md not created"; exit 1; }
-        head -n 3 "$RUNNER_TEMP/summary.md" || true
-
-        echo "mlops summary" >> "$GITHUB_STEP_SUMMARY"
         cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
-        echo "::notice:: appended to Job Summary"
-
-    - name: Append to commitHistory.csv (local)
-      shell: bash
-      env:
-        TRAINED: ${{ inputs.trained_this_run }}
-        # pass-through of outputs written by extract_mlflow.py
-        ACCURACY: ${{ steps.mlflow.outputs.accuracy }}
-        LOSS: ${{ steps.mlflow.outputs.loss }}
-        VAL_ACCURACY: ${{ steps.mlflow.outputs.val_accuracy }}
-        VAL_LOSS: ${{ steps.mlflow.outputs.val_loss }}
-        TRAIN_DUR: ${{ steps.mlflow.outputs.training_duration }}
-        MODEL_VERSION: ${{ steps.mlflow.outputs.model_version }}
-        EPOCHS: ${{ steps.mlflow.outputs.epochs }}
-        OPT_NAME: ${{ steps.mlflow.outputs.opt_name }}
-        OPT_LR: ${{ steps.mlflow.outputs.opt_lr }}
-        MONITOR: ${{ steps.mlflow.outputs.monitor }}
-        PATIENCE: ${{ steps.mlflow.outputs.patience }}
-        RESTORE_BEST_WEIGHTS: ${{ steps.mlflow.outputs.restore_best_weights }}
-        RUN_ID: ${{ steps.mlflow.outputs.run_id }}
-      run: |
-        python .github/scripts/append_commitHistory.py
-
-    - name: (Gist) Push CSV to Gist
-      if: ${{ inputs.gist_id != '' }}
-      shell: bash
-      env:
-        GIST_ID:       ${{ inputs.gist_id }}
-        GIST_FILENAME: ${{ inputs.gist_filename }}
-        GIST_TOKEN:    ${{ inputs.gist_token }}
-      run: |
-        set -euo pipefail
-        if [ -z "${GIST_TOKEN:-}" ]; then
-          echo "::error::gist_token input missing. Pass secrets.GIST_TOKEN from the workflow."; exit 1
-        fi
-        if [ ! -s commitHistory.csv ]; then
-          echo "::error::commitHistory.csv not found/empty before push."; exit 1
-        fi
-        payload=$(jq -n --arg fn "$GIST_FILENAME" --rawfile content commitHistory.csv '{files: {($fn): {content: $content}}}')
-        curl -sS -X PATCH \
-          -H "Authorization: Bearer ${GIST_TOKEN}" \
-          -H "Content-Type: application/json" \
-          -d "$payload" \
-          "https://api.github.com/gists/${GIST_ID}" >/dev/null
-        echo "Gist updated: $GIST_FILENAME"
-
-    - name: Post Summary
-      shell: bash
-      run: |
-        echo "### MLOps Summary" >> $GITHUB_STEP_SUMMARY
-        cat SUMMARY.md >> $GITHUB_STEP_SUMMARY
-
-    - name: (Optional) Prune old MLflow runs
-      if: ${{ inputs.trained_this_run == 'true' }}
-      shell: bash
-      env:
-        MLFLOW_TRACKING_URI: ${{ inputs.mlflow_tracking_uri }}
-        MLFLOW_TOKEN: ${{ inputs.mlflow_token }}
-      run: |
-        python .github/scripts/prune_mlflow_runs.py || true
