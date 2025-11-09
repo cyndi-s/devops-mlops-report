@@ -102,7 +102,7 @@ runs:
     - name: Generate Summary markdown
       shell: bash
       run: |
-        python "${{ github.action_path }}/.github/scripts/generate_summary_md.py" > "$RUNNER_TEMP/summary.md"
+        python "${{ github.action_path }}/../.github/scripts/generate_summary_md.py" > "$RUNNER_TEMP/summary.md"
         echo "mlops summary" >> "$GITHUB_STEP_SUMMARY"
         cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
