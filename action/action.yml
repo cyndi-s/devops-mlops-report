@@ -93,7 +93,7 @@ runs:
         MLFLOW_TOKEN: ${{ inputs.mlflow_token }}
         TRAINED_THIS_RUN: ${{ inputs.trained_this_run }}
       run: |
-          run: python "${{ github.action_path }}/../.github/scripts/extract_mlflow.py"
+          python "${{ github.action_path }}/../.github/scripts/extract_mlflow.py"
 
 
     # 6) Append one row, then sort by timestamp ASC (no prepend)
