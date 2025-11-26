@@ -157,13 +157,13 @@ runs:
         cat << 'EOF' >> "$GITHUB_STEP_SUMMARY"
         ## MLflow project not detected
 
-        No \`MLproject\` file was found in this repository.
+        No `MLproject` file was found in this repository.
 
         The **mlops-plugin** expects an MLflow Project with MLflow runs
         (metrics and params logged to an MLflow tracking server).
 
-        You can generate an \`MLproject\` file using the GoMLOps tool.
+        You can generate an `MLproject` file using the GoMLOps tool. [GoMLOps] (https://github.com/yorku-ease/GoMLOps)
 
-        After adding \`MLproject\` and enabling MLflow logging,
+        After adding `MLproject` file and `\arg2pipeline` folder,
         re-run this workflow.
         EOF
