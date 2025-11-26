@@ -1,5 +1,6 @@
 name: "mlops-plugin"
 description: "Links each commit to its MLflow run, renders a Summary report, and records results in a Gist CSV ledger."
+
 inputs:
   mlflow_tracking_uri:
     description: "MLflow tracking URI (e.g., DagsHub MLflow)"
@@ -54,27 +55,44 @@ runs:
   using: "composite"
   steps:
 
+    # 0) Detect MLflow project (MLproject file)
+    - name: Detect MLflow project (MLproject)
+      id: detect_mlproject
+      shell: bash
+      run: |
+        if [ -f "MLproject" ]; then
+          echo "mlproject_exists=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "mlproject_exists=false" >> "$GITHUB_OUTPUT"
+        fi
+
+   # 1) Initial training flag
     - name: Init TRAINED_THIS_RUN
+      if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
       shell: bash
       run: echo "TRAINED_THIS_RUN=false" >> "$GITHUB_ENV"
     
+    # 2) Detect cause (Data/Script/Both/None)
     - name: Detect cause (Data/Script/Both/None)
+      if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
       shell: bash
       run: |
         chmod +x "${{ github.action_path }}/../.github/scripts/detect_cause_mlops.sh"
         "${{ github.action_path }}/../.github/scripts/detect_cause_mlops.sh"
         echo "Detected CAUSE_MLOPS=$CAUSE_MLOPS"
 
+    # 3) Ensure MLflow is installed (only when MLproject exists)
     - name: Ensure MLflow is installed
-      if: ${{ inputs.install_mlflow != 'false' }}
+      if: ${{ steps.detect_mlproject.outputs.mlproject_exists == 'true' && inputs.install_mlflow != 'false' }}
       shell: bash
       run: |
         python -m pip install --upgrade pip
         pip install "mlflow>=2.4"
       
 
+    # 4) Train with MLflow (caller repo)
     - name: Train with MLflow (caller repo)
-      if: ${{ (inputs.train == 'true' || (inputs.train != 'false' && env.CAUSE_MLOPS != 'None')) && hashFiles('MLproject') != '' }}
+      if: ${{ steps.detect_mlproject.outputs.mlproject_exists == 'true' && (inputs.train == 'true' || (inputs.train != 'false' && env.CAUSE_MLOPS != 'None')) && hashFiles('MLproject') != '' }}
       shell: bash
       env:
         MLFLOW_TRACKING_URI:       ${{ inputs.mlflow_tracking_uri }}
@@ -84,8 +102,9 @@ runs:
         mlflow run . -e "${{ inputs.mlproject_entrypoint }}" --env-manager="${{ inputs.env_manager }}"
         echo "TRAINED_THIS_RUN=true" >> "$GITHUB_ENV"
     
-
+    # 5) Extract MLflow info
     - name: Extract MLflow info
+      if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
       id: ml
       shell: bash
       env:
@@ -96,27 +115,55 @@ runs:
           python "${{ github.action_path }}/../.github/scripts/extract_mlflow.py"
 
 
-    # 6) Append one row, then sort by timestamp ASC (no prepend)
+    # 6) Append one row
     - name: Append commitHistory.csv
+      if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
       shell: bash
       env:
         TRAINED_THIS_RUN: ${{ env.TRAINED_THIS_RUN }}
       run: python "${{ github.action_path }}/../.github/scripts/append_commitHistory.py"
 
-    # 7) (Optional) Push updated CSV back to Gist
+    # 7) Push updated CSV back to Gist
     - name: (Gist) Push updated CSV
-      if: ${{ inputs.gist_id != '' && inputs.gist_token != '' }}
+      if: ${{ steps.detect_mlproject.outputs.mlproject_exists == 'true' && inputs.gist_id != '' && inputs.gist_token != '' }}
       shell: bash
+      env:
+        GIST_ID:     ${{ inputs.gist_id }}
+        GIST_TOKEN:  ${{ inputs.gist_token }}
+        GIST_FILE:   ${{ inputs.gist_filename }}
       run: python "${{ github.action_path }}/../.github/scripts/append_commitHistory.py" --push-gist
 
-    # 8) Render chart (tolerant if CSV empty)
+    # 8) Render val_accuracy chart
     - name: Render val_accuracy chart
+      if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
       shell: bash
       run: python "${{ github.action_path }}/../.github/scripts/render_val_accuracy_svg.py" || true
 
-    # 9) Generate Summary (caller repo Job Summary)
+    # 9) Generate Summary (normal ML summary)
     - name: Generate Summary (Job Summary)
+      if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
       shell: bash
       run: |
         python "${{ github.action_path }}/../.github/scripts/generate_summary_md.py" > "$RUNNER_TEMP/summary.md"
         cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+    
+
+    # 10) Fallback Summary when MLproject is missing
+    - name: MLproject missing (Job Summary)
+      if: steps.detect_mlproject.outputs.mlproject_exists == 'false'
+      shell: bash
+      run: |
+        cat << 'EOF' >> "$GITHUB_STEP_SUMMARY"
+        ## MLflow project not detected
+
+        No \`MLproject\` file was found in this repository.
+
+        The **mlops-plugin** expects an MLflow Project with MLflow runs
+        (metrics and params logged to an MLflow tracking server).
+
+        You can generate an \`MLproject\` file using the GoMLOps tool.
+
+        After adding \`MLproject\` and enabling MLflow logging,
+        re-run this workflow.
+        EOF
