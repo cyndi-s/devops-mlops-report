@@ -10,10 +10,10 @@ inputs:
     required: true
   gist_id:
     description: "Gist ID to store commitHistory.csv"
-    required: false
+    required: true
   gist_token:
     description: "Token with gist scope (passed from workflow)"
-    required: false
+    required: true
   gist_filename:
     description: "filename in the Gist (default commitHistory.csv)"
     required: false
@@ -69,6 +69,7 @@ runs:
    # 1) Initial training flag
     - name: Init TRAINED_THIS_RUN
       if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
+      shell: bash
       run: |
         echo "TRAINED_THIS_RUN=false" >> "$GITHUB_ENV"
         echo "TRAINED=false" >> "$GITHUB_ENV"
@@ -125,13 +126,11 @@ runs:
     - name: Append commitHistory.csv
       if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
       shell: bash
-      env:
-        TRAINED_THIS_RUN: ${{ env.TRAINED_THIS_RUN }}
       run: python "${{ github.action_path }}/../.github/scripts/append_commitHistory.py"
 
     # 7) Push updated CSV back to Gist
     - name: (Gist) Push updated CSV
-      if: ${{ steps.detect_mlproject.outputs.mlproject_exists == 'true' && inputs.gist_id != '' && inputs.gist_token != '' }}
+      if: steps.detect_mlproject.outputs.mlproject_exists == 'true' 
       shell: bash
       env:
         GIST_ID:     ${{ inputs.gist_id }}
