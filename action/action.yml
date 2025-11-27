@@ -69,8 +69,9 @@ runs:
    # 1) Initial training flag
     - name: Init TRAINED_THIS_RUN
       if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
-      shell: bash
-      run: echo "TRAINED_THIS_RUN=false" >> "$GITHUB_ENV"
+      run: |
+        echo "TRAINED_THIS_RUN=false" >> "$GITHUB_ENV"
+        echo "TRAINED=false" >> "$GITHUB_ENV"
     
     # 2) Detect cause (Data/Script/Both/None)
     - name: Detect cause (Data/Script/Both/None)
@@ -101,6 +102,7 @@ runs:
       run: |
         mlflow run . -e "${{ inputs.mlproject_entrypoint }}" --env-manager="${{ inputs.env_manager }}"
         echo "TRAINED_THIS_RUN=true" >> "$GITHUB_ENV"
+        echo "TRAINED=true" >> "$GITHUB_ENV"
     
     # 5) Extract MLflow info
     - name: Extract MLflow info
@@ -108,17 +110,15 @@ runs:
       id: ml
       shell: bash
       env:
-        MLFLOW_TRACKING_URI: ${{ inputs.mlflow_tracking_uri }}
+        MLFLOW_TRACKING_URI:       ${{ inputs.mlflow_tracking_uri }}
+        MLFLOW_TRACKING_USERNAME:  ${{ inputs.mlflow_username }}
+        MLFLOW_TRACKING_PASSWORD:  ${{ inputs.mlflow_token }}
         DAGSHUB_USER:              ${{ inputs.mlflow_username }}
         DAGSHUB_TOKEN:             ${{ inputs.mlflow_token }}
-        TRAINED_THIS_RUN: ${{ inputs.trained_this_run }}
+        TRAINED_THIS_RUN:          ${{ env.TRAINED_THIS_RUN }}
       run: |
           python "${{ github.action_path }}/../.github/scripts/extract_mlflow.py"
-          # debug: show what was written for this run (if file exists)
-          if [ -f ".mlops/last_run.json" ]; then
-            echo "last_run.json:"
-            cat .mlops/last_run.json
-          fi
+          
 
 
     # 6) Append one row
