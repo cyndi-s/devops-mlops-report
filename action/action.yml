@@ -126,6 +126,24 @@ runs:
     - name: Append commitHistory.csv
       if: steps.detect_mlproject.outputs.mlproject_exists == 'true'
       shell: bash
+      env:
+        # training flag (set earlier by Train step)
+        TRAINED: ${{ env.TRAINED }}
+
+        # MLflow outputs from the Extract step (id: ml)
+        RUN_ID:             ${{ steps.ml.outputs.run_id }}
+        accuracy:           ${{ steps.ml.outputs.accuracy }}
+        loss:               ${{ steps.ml.outputs.loss }}
+        val_accuracy:       ${{ steps.ml.outputs.val_accuracy }}
+        val_loss:           ${{ steps.ml.outputs.val_loss }}
+        training_duration:  ${{ steps.ml.outputs.training_duration }}
+        model_version:      ${{ steps.ml.outputs.model_version }}
+        epochs:             ${{ steps.ml.outputs.epochs }}
+        opt_name:           ${{ steps.ml.outputs.opt_name }}
+        opt_learning_rate:  ${{ steps.ml.outputs.opt_learning_rate }}
+        monitor:            ${{ steps.ml.outputs.monitor }}
+        patience:           ${{ steps.ml.outputs.patience }}
+        restore_best_weights: ${{ steps.ml.outputs.restore_best_weights }}
       run: python "${{ github.action_path }}/../.github/scripts/append_commitHistory.py"
 
     # 7) Push updated CSV back to Gist
