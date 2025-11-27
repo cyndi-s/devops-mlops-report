@@ -109,10 +109,16 @@ runs:
       shell: bash
       env:
         MLFLOW_TRACKING_URI: ${{ inputs.mlflow_tracking_uri }}
-        MLFLOW_TOKEN: ${{ inputs.mlflow_token }}
+        DAGSHUB_USER:              ${{ inputs.mlflow_username }}
+        DAGSHUB_TOKEN:             ${{ inputs.mlflow_token }}
         TRAINED_THIS_RUN: ${{ inputs.trained_this_run }}
       run: |
           python "${{ github.action_path }}/../.github/scripts/extract_mlflow.py"
+          # debug: show what was written for this run (if file exists)
+          if [ -f ".mlops/last_run.json" ]; then
+            echo "last_run.json:"
+            cat .mlops/last_run.json
+          fi
 
 
     # 6) Append one row
