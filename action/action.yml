@@ -129,7 +129,6 @@ runs:
       env:
         # training flag (set earlier by Train step)
         TRAINED: ${{ env.TRAINED }}
-
         # MLflow outputs from the Extract step (id: ml)
         RUN_ID:             ${{ steps.ml.outputs.run_id }}
         accuracy:           ${{ steps.ml.outputs.accuracy }}
