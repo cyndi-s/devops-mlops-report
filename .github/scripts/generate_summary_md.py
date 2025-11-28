@@ -1,205 +1,310 @@
 #!/usr/bin/env python3
 """
-Print a rich Pipeline Summary to $GITHUB_STEP_SUMMARY, matching the POC-Mobile layout.
+Generate a 5-part Pipeline Summary for the GitHub Actions Job Summary.
 
-It looks for artifacts in this order (first found wins):
-  CSV:      .mlops/commitHistory.csv  → artifacts/commitHistory.csv → commitHistory.csv
-  CHART:    .mlops/val_accuracy.png   → .mlops/val_accuracy.svg
-            → artifacts/val_accuracy.png → artifacts/val_accuracy.svg
-            → val_accuracy.png → val_accuracy.svg
+Sections:
+1) Model in APK: from this workflow run
+2) Model Performance (val_accuracy)
+3) Code
+4) Artifacts
+5) Commit History
 
-It keeps headers stable across repos.
+Data source is a commitHistory.csv ledger produced by the mlops-plugin.
 """
 
 import os
 import sys
 import io
-from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
 
+
 # ---------- Helpers ----------
+
 def find_first(paths):
     for p in paths:
         if p and os.path.exists(p):
             return p
     return None
 
-def ensure_toronto_timestamp(ts):
-    # Accepts string or pd.Timestamp; prints as "YYYY-MM-DD HH:MM"
-    try:
-        if pd.isna(ts):
-            return ""
-        if isinstance(ts, pd.Timestamp):
-            t = ts
-        else:
-            t = pd.to_datetime(ts, errors="coerce", utc=True)
-        if t.tzinfo is None:
-            t = t.tz_localize("UTC")
-        toronto = t.tz_convert("America/Toronto")
-        return toronto.strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        # Best effort
-        try:
-            return pd.to_datetime(ts).strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            return str(ts) if ts is not None else ""
 
-def to_md_table(df):
-    if df.empty:
-        return "_No data._\n"
-    buf = io.StringIO()
-    # escape pipes in cells
-    safe = df.copy()
-    for c in safe.columns:
-        safe[c] = safe[c].astype(str).str.replace("|", r"\|", regex=False)
-    header = "| " + " | ".join(safe.columns) + " |"
-    sep = "|" + "|".join(["---"] * len(safe.columns)) + "|"
-    rows = ["| " + " | ".join(r) + " |" for r in safe.astype(str).values.tolist()]
-    buf.write(header + "\n")
-    buf.write(sep + "\n")
-    buf.write("\n".join(rows) + "\n")
-    return buf.getvalue()
+def ensure_timestamp_col(df: pd.DataFrame) -> str:
+    """
+    Ensure df has a 'Timestamp (Toronto)' column and return its name.
+    We don't actually convert timezone here; we just normalize header and format.
+    """
+    col = None
+    for cand in df.columns:
+        low = str(cand).lower()
+        if "timestamp (toronto" in low or "timestamp" in low:
+            col = cand
+            break
 
-def format_params_row(row):
-    # Collect common hyperparams if present, otherwise fallback to any param_* columns.
-    keys_preferred = [
-        "epochs","opt_name","opt_learning_rate","monitor",
-        "patience","restore_best_weights","batch_size","lr","optimizer"
+    if col is None:
+        df["Timestamp (Toronto)"] = ""
+        return "Timestamp (Toronto)"
+
+    df["Timestamp (Toronto)"] = df[col].astype(str)
+    return "Timestamp (Toronto)"
+
+
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    rename = {}
+    for c in df.columns:
+        lc = str(c).lower()
+        if lc == "branch":
+            rename[c] = "Branch"
+        elif lc == "author":
+            rename[c] = "Author"
+        elif lc.startswith("status"):
+            rename[c] = "status"
+        elif "training_duration" in lc and "(min" in lc:
+            rename[c] = "train_min"
+        elif "commit_id" in lc or lc == "sha":
+            rename[c] = "commit_id"
+    if rename:
+        df = df.rename(columns=rename)
+    return df
+
+
+def format_params_row(row: pd.Series) -> str:
+    # Preferred hyperparams
+    keys = [
+        "epochs",
+        "opt_name",
+        "opt_learning_rate",
+        "monitor",
+        "patience",
+        "restore_best_weights",
     ]
     parts = []
-    for k in keys_preferred:
+    for k in keys:
         if k in row and pd.notna(row[k]) and str(row[k]) != "":
-            parts.append(f"{k}: {row[k]}")
-    # Any param_* columns (param_foo) get included as foo: value
+            parts.append(f"{k}={row[k]}")
+    # fall back to any param_* columns
     for c in row.index:
-        if c.startswith("param_") and pd.notna(row[c]) and str(row[c]) != "":
-            parts.append(f"{c[6:]}: {row[c]}")
-    if not parts and "parameters" in row and pd.notna(row["parameters"]):
-        # raw JSON/YAML string if available
-        return str(row["parameters"])
-    return "\n".join(parts) if parts else "—"
+        if str(c).startswith("param_") and pd.notna(row[c]) and str(row[c]) != "":
+            parts.append(f"{c[6:]}={row[c]}")
+    if not parts:
+        return "—"
+    return ", ".join(parts)
 
-# ---------- Locate inputs ----------
-csv_path = find_first([
-    ".mlops/commitHistory.csv", "artifacts/commitHistory.csv", "commitHistory.csv"
-])
-chart_path = find_first([
-    ".mlops/val_accuracy.png", ".mlops/val_accuracy.svg",
-    "artifacts/val_accuracy.png", "artifacts/val_accuracy.svg",
-    "val_accuracy.png", "val_accuracy.svg"
-])
 
-# ---------- Read CSV (tolerant) ----------
-cols_target_latest = [
-    "Timestamp (Toronto)","Branch","Author","Cause",
-    "val_accuracy","Δval_accuracy","model_version","run_id",
-    "train_min","status","trained"
-]
-cols_fallback_map = {
-    # map your lite CSV -> target columns when possible
-    "commit_id": None, "branch": "Branch", "status": "status", "trained": "trained",
-    "cause": "Cause", "model_ver": "model_version", "run_id": "run_id",
-    "val_acc": "val_accuracy", "train_min": "train_min", "author": "Author",
-    "timestamp": "Timestamp (Toronto)",
-}
+def to_md_table(df: pd.DataFrame) -> str:
+    if df is None or df.empty:
+        return "_No data available._"
+    return df.to_markdown(index=False)
 
-df = pd.DataFrame()
-if csv_path and os.path.exists(csv_path):
+
+def main() -> None:
+    # ---------- Locate inputs ----------
+    csv_path = find_first(
+        [".mlops/commitHistory.csv", "artifacts/commitHistory.csv", "commitHistory.csv"]
+    )
+    chart_path = find_first(
+        [
+            ".mlops/val_accuracy.png",
+            ".mlops/val_accuracy.svg",
+            "artifacts/val_accuracy.png",
+            "artifacts/val_accuracy.svg",
+            "val_accuracy.png",
+            "val_accuracy.svg",
+        ]
+    )
+
+    out = io.StringIO()
+
+    if not csv_path or not os.path.exists(csv_path):
+        out.write("# Pipeline Summary\n\n")
+        out.write("No `commitHistory.csv` found. The mlops-plugin did not log any runs yet.\n")
+        sys.stdout.write(out.getvalue())
+        return
+
+    # ---------- Read CSV ----------
     try:
         df = pd.read_csv(csv_path)
-    except Exception:
-        pass
+    except Exception as e:
+        out.write("# Pipeline Summary\n\n")
+        out.write(f"Failed to read `{csv_path}`: {e}\n")
+        sys.stdout.write(out.getvalue())
+        return
 
-# Normalize columns
-if not df.empty:
-    # Create target columns
-    for col in cols_target_latest:
-        if col not in df.columns:
-            # try to fill from fallback map
-            source = [k for k,v in cols_fallback_map.items() if v == col]
-            filled = False
-            for s in source:
-                if s in df.columns:
-                    df[col] = df[s]
-                    filled = True
-                    break
-            if not filled:
-                df[col] = ""
+    df = normalize_columns(df)
+    ts_col = ensure_timestamp_col(df)
 
-    # Timestamp formatting
-    # Prefer any 'Timestamp (Toronto)' already present; else derive from 'timestamp' or MLflow start_time
-    if df["Timestamp (Toronto)"].eq("").all():
-        maybe = None
-        for cand in ["timestamp","start_time","end_time","datetime","time"]:
-            if cand in df.columns:
-                maybe = cand
-                break
-        if maybe:
-            df["Timestamp (Toronto)"] = df[maybe].apply(ensure_toronto_timestamp)
-        else:
-            df["Timestamp (Toronto)"] = ""
-
-    # Compute Δval_accuracy per branch
-    try:
+    # Compute Δval_accuracy per Branch (if metric exists)
+    if "val_accuracy" in df.columns:
         tmp = df.copy()
-        tmp["val_accuracy"] = pd.to_numeric(tmp["val_accuracy"], errors="coerce")
-        tmp.sort_values(by=["Branch","Timestamp (Toronto)"], inplace=True)
-        tmp["prev"] = tmp.groupby("Branch")["val_accuracy"].shift(1)
-        tmp["Δval_accuracy"] = (tmp["val_accuracy"] - tmp["prev"]).round(3)
-        # merge deltas back on index
+        tmp["val_accuracy_num"] = pd.to_numeric(tmp["val_accuracy"], errors="coerce")
+        tmp.sort_values(by=["Branch", ts_col], inplace=True, ignore_index=True)
+        tmp["prev"] = tmp.groupby("Branch")["val_accuracy_num"].shift(1)
+        tmp["Δval_accuracy"] = (tmp["val_accuracy_num"] - tmp["prev"]).round(3)
         df["Δval_accuracy"] = tmp["Δval_accuracy"]
-    except Exception:
-        pass
+    else:
+        df["Δval_accuracy"] = pd.NA
 
-# ---------- Section 1: Model from this workflow run ----------
-# pick the latest successful row if available; else the latest row.
-latest_row = None
-if not df.empty:
-    # sort by timestamp-like column if possible
-    try:
-        order = pd.to_datetime(df["Timestamp (Toronto)"], errors="coerce")
-        df = df.loc[order.sort_values(ascending=False).index]
-    except Exception:
-        pass
-    cand = df[(df["status"].astype(str).str.lower() == "success") & (df["trained"].astype(str).str.lower() == "true")]
-    latest_row = cand.iloc[0] if not cand.empty else df.iloc[0]
+    # Training duration column (train_min) if not already normalized
+    if "train_min" not in df.columns:
+        dur_col = None
+        for c in df.columns:
+            if "training_duration" in str(c).lower():
+                dur_col = c
+                break
+        if dur_col:
+            df["train_min"] = df[dur_col]
+        else:
+            df["train_min"] = ""
 
-# Build section 1 table
-sec1_cols = ["Timestamp (Toronto)","model_version","Cause","Parameters","accuracy"]
-sec1_df = pd.DataFrame(columns=sec1_cols)
-if latest_row is not None:
+    # Row for "this workflow run": last row in CSV
+    latest_row = df.iloc[-1]
+
+    # ---------- Section 1: Model in APK ----------
+    sec1_cols = [
+        "Timestamp (Toronto)",
+        "model_version",
+        "Cause",
+        "Parameters",
+        "accuracy",
+        "val_accuracy",
+        "Δval_accuracy",
+        "loss",
+        "val_loss",
+        "Duration (min)",
+    ]
+    sec1_df = pd.DataFrame(columns=sec1_cols)
+
     params = format_params_row(latest_row)
-    accuracy = latest_row["val_accuracy"] if "val_accuracy" in latest_row.index else latest_row.get("accuracy","")
+    accuracy = latest_row.get("accuracy", "")
+    val_accuracy = latest_row.get("val_accuracy", "")
+    delta = latest_row.get("Δval_accuracy", "")
+    loss = latest_row.get("loss", "")
+    val_loss = latest_row.get("val_loss", "")
+    duration = latest_row.get("train_min", "")
+
     sec1_df.loc[0] = [
-        latest_row.get("Timestamp (Toronto)",""),
-        latest_row.get("model_version",""),
-        latest_row.get("Cause",""),
+        latest_row.get("Timestamp (Toronto)", ""),
+        latest_row.get("model_version", ""),
+        latest_row.get("Cause", latest_row.get("CAUSE_MLOPS", "")),
         params,
-        accuracy if pd.notna(accuracy) else ""
+        accuracy,
+        val_accuracy,
+        delta,
+        loss,
+        val_loss,
+        duration,
     ]
 
-# ---------- Section 2: Chart ----------
-chart_md = "_No chart generated._"
-if chart_path:
-    chart_md = f"![val_accuracy]({chart_path})"
+    # ---------- Section 2: Performance trend ----------
+    if chart_path:
+        chart_md = f"![val_accuracy]({chart_path})"
+    else:
+        chart_md = "_No chart generated._"
 
-# ---------- Section 3: Latest 10 runs ----------
-sec3_df = pd.DataFrame(columns=cols_target_latest)
-if not df.empty:
-    take = df[cols_target_latest].copy()
-    # prettify TS
-    take["Timestamp (Toronto)"] = take["Timestamp (Toronto)"].apply(ensure_toronto_timestamp)
-    sec3_df = take.head(10)
+    cols2 = [
+        "Timestamp (Toronto)",
+        "Branch",
+        "Author",
+        "Cause",
+        "val_accuracy",
+        "Δval_accuracy",
+        "Duration (min)",
+        "Commit",
+    ]
+    sec2_df = pd.DataFrame(columns=cols2)
 
-# ---------- Emit Markdown ----------
-out = io.StringIO()
-out.write("# Pipeline Summary\n\n")
-out.write("## 1) Model in APK: from this workflow run\n\n")
-out.write(to_md_table(sec1_df))
-out.write("\n")
-out.write("## 2) Model Performance (val_accuracy)\n\n")
-out.write(chart_md + "\n\n")
-out.write("## 3) Latest 10 runs\n\n")
-out.write(to_md_table(sec3_df))
+    server = os.getenv("GITHUB_SERVER_URL", "https://github.com")
+    repo = os.getenv("GITHUB_REPOSITORY", "").strip("/")
+    base_url = f"{server}/{repo}" if repo else ""
 
-sys.stdout.write(out.getvalue())
+    last10 = df.tail(10).copy()
+    for _, row in last10.iterrows():
+        sha_full = str(row.get("commit_id", ""))
+        sha = sha_full[:7] if sha_full else ""
+        if base_url and sha_full:
+            commit_link = f"[{sha}]({base_url}/commit/{sha_full})"
+        else:
+            commit_link = sha or ""
+        sec2_df.loc[len(sec2_df)] = [
+            row.get("Timestamp (Toronto)", ""),
+            row.get("Branch", ""),
+            row.get("Author", ""),
+            row.get("Cause", row.get("CAUSE_MLOPS", "")),
+            row.get("val_accuracy", ""),
+            row.get("Δval_accuracy", ""),
+            row.get("train_min", ""),
+            commit_link,
+        ]
+
+    # ---------- Section 3: Code ----------
+    code_lines = []
+    code_lines.append(f"- **Branch:** {latest_row.get('Branch', '')}")
+    code_lines.append(f"- **Author:** {latest_row.get('Author', '')}")
+    if base_url and latest_row.get("commit_id", ""):
+        sha_full = str(latest_row.get("commit_id", ""))
+        sha_short = sha_full[:7]
+        code_lines.append(f"- **Commit:** [{sha_short}]({base_url}/commit/{sha_full})")
+    else:
+        code_lines.append(f"- **Commit:** {latest_row.get('commit_id', '')}")
+    code_lines.append(f"- **Status:** {latest_row.get('status', '')}")
+    code_lines.append(
+        f"- **Trained model this run:** "
+        f"{latest_row.get('trained_model', latest_row.get('TRAINED', ''))}"
+    )
+    code_md = "\n".join(code_lines)
+
+    # ---------- Section 4: Artifacts ----------
+    artifacts_rows = []
+    for root in ["artifacts", ".mlops"]:
+        if not os.path.isdir(root):
+            continue
+        for p in sorted(Path(root).rglob("*")):
+            if p.is_file():
+                rel = p.as_posix()
+                if rel.endswith("commitHistory.csv"):
+                    continue
+                size = p.stat().st_size
+                artifacts_rows.append({"Artifact": rel, "Size": size})
+    if artifacts_rows:
+        sec4_df = pd.DataFrame(artifacts_rows)
+    else:
+        sec4_df = pd.DataFrame(columns=["Artifact", "Size"])
+
+    # ---------- Section 5: Commit History ----------
+    history_link = csv_path.replace("\\", "/")
+
+    # ---------- Emit Markdown ----------
+    out.write("# Pipeline Summary\n\n")
+
+    # 1) Model in APK
+    out.write("## 1) Model in APK: from this workflow run\n\n")
+    out.write(to_md_table(sec1_df))
+    out.write("\n\n")
+
+    # 2) Performance
+    out.write("## 2) Model Performance (val_accuracy)\n\n")
+    out.write(chart_md + "\n\n")
+    out.write(to_md_table(sec2_df))
+    out.write("\n\n")
+
+    # 3) Code
+    out.write("## 3) Code\n\n")
+    out.write(code_md + "\n\n")
+
+    # 4) Artifacts
+    out.write("## 4) Artifacts\n\n")
+    if sec4_df.empty:
+        out.write("_None_\n\n")
+    else:
+        out.write(to_md_table(sec4_df) + "\n\n")
+
+    # 5) Commit History
+    out.write("## 5) Commit History\n\n")
+    out.write(f"- Commit History: [{os.path.basename(history_link)}]({history_link})\n\n")
+    out.write("_Job summary generated at run-time_\n")
+
+    sys.stdout.write(out.getvalue())
+
+
+if __name__ == "__main__":
+    main()
