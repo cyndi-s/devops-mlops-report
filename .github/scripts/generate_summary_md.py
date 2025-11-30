@@ -1,260 +1,353 @@
 #!/usr/bin/env python3
-"""
-Generate a 5-part Pipeline Summary for the GitHub Actions Job Summary.
-
-Sections:
-1) Model in APK: from this workflow run
-2) Model Performance (val_accuracy)
-3) Code
-4) Artifacts
-5) Commit History
-
-Data source is a commitHistory.csv ledger produced by the mlops-plugin.
-"""
-
 import os
-import sys
-import io
+import csv
+import html
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
-import pandas as pd
+# ---- Environment / constants ----
+LOCAL_TZ = os.getenv("LOCAL_TZ", "America/Toronto")
+LOCAL_ZONE = ZoneInfo(LOCAL_TZ)
 
+SUMMARY = os.getenv("GITHUB_STEP_SUMMARY", "/dev/stdout")
+REPO = os.getenv("GITHUB_REPOSITORY", "")
+SHA = os.getenv("GITHUB_SHA", "")
+BRANCH = os.getenv("GITHUB_REF_NAME", "")
+ACTOR = os.getenv("GITHUB_ACTOR", "")
+COMMIT_MSG = os.getenv("GITHUB_EVENT_HEAD_COMMIT_MESSAGE", "")
+SHARP_DELTA = float(os.getenv("SHARP_DELTA", "0.15"))
 
-# ---------- Helpers ----------
-
-def find_first(paths):
-    for p in paths:
-        if p and os.path.exists(p):
-            return p
-    return None
-
-
-def ensure_timestamp_col(df: pd.DataFrame) -> str:
-    """
-    Ensure df has a 'Timestamp (Toronto)' column and return its name.
-    We don't actually convert timezone here; we just normalize header and format.
-    """
-    col = None
-    for cand in df.columns:
-        low = str(cand).lower()
-        if "timestamp (toronto" in low or "timestamp" in low:
-            col = cand
-            break
-
-    if col is None:
-        df["Timestamp (Toronto)"] = ""
-        return "Timestamp (Toronto)"
-
-    df["Timestamp (Toronto)"] = df[col].astype(str)
-    return "Timestamp (Toronto)"
-
-
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    rename = {}
-    for c in df.columns:
-        lc = str(c).lower()
-        if lc == "branch":
-            rename[c] = "Branch"
-        elif lc == "author":
-            rename[c] = "Author"
-        elif lc.startswith("status"):
-            rename[c] = "status"
-        elif "training_duration" in lc and "(min" in lc:
-            rename[c] = "train_min"
-        elif "commit_id" in lc or lc == "sha":
-            rename[c] = "commit_id"
-    if rename:
-        df = df.rename(columns=rename)
-    return df
-
-
-def format_params_row(row: pd.Series) -> str:
-    # Preferred hyperparams
-    keys = [
-        "epochs",
-        "opt_name",
-        "opt_learning_rate",
-        "monitor",
-        "patience",
-        "restore_best_weights",
-    ]
-    parts = []
-    for k in keys:
-        if k in row and pd.notna(row[k]) and str(row[k]) != "":
-            parts.append(f"{k}={row[k]}")
-    # fall back to any param_* columns
-    for c in row.index:
-        if str(c).startswith("param_") and pd.notna(row[c]) and str(row[c]) != "":
-            parts.append(f"{c[6:]}={row[c]}")
-    if not parts:
-        return "—"
-    return ", ".join(parts)
-
-
-def to_md_table(df: pd.DataFrame) -> str:
-    if df is None or df.empty:
-        return "_No data available._"
-    return df.to_markdown(index=False)
-
-
-def main() -> None:
-    # ---------- Locate inputs ----------
-    csv_path = find_first(
-        [".mlops/commitHistory.csv", "artifacts/commitHistory.csv", "commitHistory.csv"]
-    )
-    chart_path = find_first(
-        [
-            ".mlops/val_accuracy.png",
-            ".mlops/val_accuracy.svg",
-            "artifacts/val_accuracy.png",
-            "artifacts/val_accuracy.svg",
-            "val_accuracy.png",
-            "val_accuracy.svg",
-        ]
-    )
-
-    out = io.StringIO()
-
-    if not csv_path or not os.path.exists(csv_path):
-        out.write("# Pipeline Summary\n\n")
-        out.write("No `commitHistory.csv` found. The mlops-plugin did not log any runs yet.\n")
-        sys.stdout.write(out.getvalue())
-        return
-
-    # ---------- Read CSV ----------
+def ts_from_epoch(s: str) -> str:
     try:
-        df = pd.read_csv(csv_path)
-    except Exception as e:
-        out.write("# Pipeline Summary\n\n")
-        out.write(f"Failed to read `{csv_path}`: {e}\n")
-        sys.stdout.write(out.getvalue())
+        dt = datetime.fromtimestamp(int(s), tz=ZoneInfo("UTC")).astimezone(LOCAL_ZONE)
+        return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+    except Exception:
+        return ""
+
+# ---------- Formatting helpers (copied from concept script) ----------
+
+def diff(a, b):
+    try:
+        if a in ("", None) or b in ("", None):
+            return ""
+        return f"{float(b) - float(a):+.3f}"
+    except Exception:
+        return ""
+
+
+def fmt_val(x):
+    """3 decimals; scientific if very small."""
+    try:
+        x = float(x)
+        return f"{x:.3f}" if abs(x) >= 1e-3 or x == 0 else f"{x:.1e}"
+    except Exception:
+        return "" if x in ("", None) else str(x)
+
+
+def fmt_arrow_delta(a, b):
+    """Arrow + absolute delta with 3 decimals (or scientific)."""
+    try:
+        if a in ("", None) or b in ("", None):
+            return ""
+        d = float(b) - float(a)
+        arrow = "↑" if d > 0 else ("↓" if d < 0 else "→")
+        mag = abs(d)
+        mag_s = f"{mag:.3f}" if mag >= 1e-3 or mag == 0 else f"{mag:.1e}"
+        return f"{arrow} {mag_s}"
+    except Exception:
+        return ""
+
+
+def fmt_arrow_minutes(d):
+    """Arrow + absolute delta in minutes (1 decimals)."""
+    try:
+        if d in ("", None):
+            return ""
+        d = float(d)
+        arrow = "↑" if d > 0 else ("↓" if d < 0 else "→")
+        return f"{arrow} {abs(d):.1f}"
+    except Exception:
+        return ""
+
+
+def fmt_arrow_from_value(d):
+    try:
+        d = float(d)
+        arrow = "↑" if d > 0 else ("↓" if d < 0 else "→")
+        mag = abs(d)
+        return f"{arrow} {(f'{mag:.3f}' if mag >= 1e-3 or mag == 0 else f'{mag:.1e}')}"
+    except Exception:
+        return ""
+
+
+def fmt_dur(m):
+    return "" if m in (None, "") else f"{float(m):.1f}"
+
+
+# ---------- Data loading ----------
+
+def load_commit_history():
+    candidates = [
+        ".mlops/commitHistory.csv",
+        "commitHistory.csv",
+        "artifacts/commitHistory.csv",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            with open(path, newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            return path, rows
+    return None, []
+
+
+def parse_float(v):
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
+def main():
+    csv_path, rows = load_commit_history()
+
+    lines = []
+    lines.append("# Pipeline Summary\n")
+
+    if not rows:
+        lines.append("No `commitHistory.csv` found. The mlops-plugin did not log any runs yet.\n")
+        with open(SUMMARY, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
         return
 
-    df = normalize_columns(df)
-    ts_col = ensure_timestamp_col(df)
+    # assume rows are oldest -> newest; protect if not
+    # try to sort by timestamp column if it exists
+    ts_field = None
+    for k in rows[0].keys():
+        lk = k.lower()
+        if "timestamp" in lk:
+            ts_field = k
+            break
+    if ts_field:
+        rows = sorted(
+            rows,
+            key=lambda r: r.get(ts_field, ""),
+        )
 
-    # Compute Δval_accuracy per Branch (if metric exists)
-    if "val_accuracy" in df.columns:
-        tmp = df.copy()
-        tmp["val_accuracy_num"] = pd.to_numeric(tmp["val_accuracy"], errors="coerce")
-        tmp.sort_values(by=["Branch", ts_col], inplace=True, ignore_index=True)
-        tmp["prev"] = tmp.groupby("Branch")["val_accuracy_num"].shift(1)
-        tmp["Δval_accuracy"] = (tmp["val_accuracy_num"] - tmp["prev"]).round(3)
-        df["Δval_accuracy"] = tmp["Δval_accuracy"]
+    latest = rows[-1]
+    prev = rows[-2] if len(rows) > 1 else None
+
+    # ---- Section 1: latest run summary ----
+    # timestamp
+    ts_end = latest.get(ts_field, "")
+
+    # metrics
+    acc = latest.get("accuracy", "")
+    vacc = latest.get("val_accuracy", "")
+    los = latest.get("loss", "")
+    vlos = latest.get("val_loss", "")
+    pvacc = prev.get("val_accuracy", "") if prev else ""
+    plos = prev.get("val_loss", "") if prev else ""
+
+    # duration
+    dur = latest.get("train_min", latest.get("training_duration", ""))
+    prev_dur = prev.get("train_min", prev.get("training_duration", "")) if prev else ""
+    dur_tx = fmt_dur(dur)
+    d_dur = None
+    if dur not in ("", None) and prev_dur not in ("", None):
+        try:
+            d_dur = float(dur) - float(prev_dur)
+        except Exception:
+            d_dur = None
+
+    # params from columns
+    pe = latest.get("epochs", "")
+    po = latest.get("opt_name", "")
+    plr = latest.get("opt_learning_rate", "")
+    pm = latest.get("monitor", "")
+    pp = latest.get("patience", "")
+    prbw = latest.get("restore_best_weights", "")
+
+    params_str = (
+        f"epochs={pe}, opt_name={po}, opt_learning_rate={fmt_val(plr)}, "
+        f"monitor={pm}, patience={pp}, restore_best_weights={prbw}"
+    )
+    params_html = f"<code>{html.escape(params_str)}</code>"
+
+    model_version = latest.get("model_version", "")
+    cause = latest.get("cause_mlops", latest.get("Cause", "None")) or "None"
+
+    # trained flag from CSV (or env)
+    trained_csv = str(latest.get("trained_model", latest.get("TRAINED", ""))).lower()
+    trained_flag = trained_csv == "true"
+    if not trained_flag:
+        trained_env = (os.getenv("TRAINED_THIS_RUN", "").lower() == "true") or (
+            os.getenv("TRAINED", "").lower() == "true"
+        )
+        trained_flag = trained_env
+
+    status_text = "from this workflow run" if trained_flag else "from a previous run"
+    badge = f"<strong><ins><code>{html.escape(status_text)}</code></ins></strong>"
+
+    # cause cell
+    cause_cell = f"<code>{html.escape(cause)}</code>"
+
+    lines.append(f"## 1) Model in APK: {badge}\n")
+
+    lines.append('<table style="width:100%; text-align:center;">')
+    lines.append(
+        "<thead><tr>"
+        f"<th>Timestamp<br>({LOCAL_TZ.split('/')[-1]})</th>"
+        "<th>model_version</th><th>Cause</th><th>Parameters</th>"
+        "<th>accuracy</th><th>val_accuracy</th><th>Δval_accuracy</th>"
+        "<th>loss</th><th>val_loss</th><th>Δval_loss</th>"
+        "<th>Duration<br>(min)</th><th>ΔDuration<br>(min)</th>"
+        "</tr></thead>"
+    )
+    lines.append("<tbody><tr>")
+
+    for cell in [
+        ts_end,
+        model_version or "",
+        cause_cell,
+        params_html,
+        fmt_val(acc),
+        fmt_val(vacc),
+        fmt_arrow_delta(pvacc, vacc),
+        fmt_val(los),
+        fmt_val(vlos),
+        fmt_arrow_delta(plos, vlos),
+        dur_tx,
+        fmt_arrow_minutes(d_dur),
+    ]:
+        lines.append(
+            "<td style='text-align:center; vertical-align:middle; "
+            "word-break:break-word; max-width:100%'>" + str(cell) + "</td>"
+        )
+
+    lines.append("</tr></tbody></table>\n")
+
+    # ---- Section 2: Performance history (last 10 runs) ----
+    lines.append("## 2) Model Performance (val_accuracy)\n")
+
+    # chart: use local .mlops/val_accuracy.svg/png if exists
+    svg_path = None
+    for cand in [".mlops/val_accuracy.svg", ".mlops/val_accuracy.png", "val_accuracy.svg", "val_accuracy.png"]:
+        if os.path.exists(cand):
+            svg_path = cand
+            break
+    if svg_path:
+        lines.append(f"<img alt='val_accuracy trend' src='{svg_path}' style='width:100%; height:auto; display:block;'/>")
     else:
-        df["Δval_accuracy"] = pd.NA
+        lines.append("<em>val_accuracy chart not available.</em>")
 
-    # Training duration column (train_min) if not already normalized
-    if "train_min" not in df.columns:
-        dur_col = None
-        for c in df.columns:
-            if "training_duration" in str(c).lower():
-                dur_col = c
-                break
-        if dur_col:
-            df["train_min"] = df[dur_col]
-        else:
-            df["train_min"] = ""
+    lines.append("")  # blank line
 
-    # Row for "this workflow run": last row in CSV
-    latest_row = df.iloc[-1]
-
-    # ---------- Section 1: Model in APK ----------
-    sec1_cols = [
-        "Timestamp (Toronto)",
-        "model_version",
-        "Cause",
-        "Parameters",
-        "accuracy",
-        "val_accuracy",
-        "Δval_accuracy",
-        "loss",
-        "val_loss",
-        "Duration (min)",
-    ]
-    sec1_df = pd.DataFrame(columns=sec1_cols)
-
-    params = format_params_row(latest_row)
-    accuracy = latest_row.get("accuracy", "")
-    val_accuracy = latest_row.get("val_accuracy", "")
-    delta = latest_row.get("Δval_accuracy", "")
-    loss = latest_row.get("loss", "")
-    val_loss = latest_row.get("val_loss", "")
-    duration = latest_row.get("train_min", "")
-
-    sec1_df.loc[0] = [
-        latest_row.get("Timestamp (Toronto)", ""),
-        latest_row.get("model_version", ""),
-        latest_row.get("Cause", latest_row.get("CAUSE_MLOPS", "")),
-        params,
-        accuracy,
-        val_accuracy,
-        delta,
-        loss,
-        val_loss,
-        duration,
-    ]
-
-    # ---------- Section 2: Performance trend ----------
-    if chart_path:
-        chart_md = f"![val_accuracy]({chart_path})"
-    else:
-        chart_md = "_No chart generated._"
-
-    cols2 = [
-        "Timestamp (Toronto)",
+    lines.append(
+        "<table style='width:100%; table-layout:auto; border-collapse:collapse;'>"
+    )
+    lines.append("<thead><tr>")
+    for col in [
+        f"Timestamp<br>({LOCAL_TZ.split('/')[-1]})",
         "Branch",
         "Author",
         "Cause",
         "val_accuracy",
         "Δval_accuracy",
-        "Duration (min)",
+        "Duration<br>(min)",
         "Commit",
-    ]
-    sec2_df = pd.DataFrame(columns=cols2)
+    ]:
+        lines.append(f"<th style='text-align:center'>{col}</th>")
+    lines.append("</tr></thead><tbody>")
 
-    server = os.getenv("GITHUB_SERVER_URL", "https://github.com")
-    repo = os.getenv("GITHUB_REPOSITORY", "").strip("/")
-    base_url = f"{server}/{repo}" if repo else ""
+    # last 10 rows oldest -> newest
+    tail = rows[-10:]
+    # compute Δval_accuracy within tail
+    prev_va = None
+    for row in tail:
+        ts_cell = row.get(ts_field, "")
+        br = row.get("Branch", row.get("branch", ""))
+        au = row.get("Author", row.get("author", ""))
+        cause_row = row.get("cause_mlops", row.get("Cause", "None")) or "None"
+        va_raw = row.get("val_accuracy", "")
+        va = parse_float(va_raw)
+        delta_val = va - prev_va if (va is not None and prev_va is not None) else 0.0
+        prev_va = va if va is not None else prev_va
+        dur_row = row.get("train_min", row.get("training_duration", ""))
 
-    last10 = df.tail(10).copy()
-    for _, row in last10.iterrows():
-        sha_full = str(row.get("commit_id", ""))
-        sha = sha_full[:7] if sha_full else ""
-        if base_url and sha_full:
-            commit_link = f"[{sha}]({base_url}/commit/{sha_full})"
-        else:
-            commit_link = sha or ""
-        sec2_df.loc[len(sec2_df)] = [
-            row.get("Timestamp (Toronto)", ""),
-            row.get("Branch", ""),
-            row.get("Author", ""),
-            row.get("Cause", row.get("CAUSE_MLOPS", "")),
-            row.get("val_accuracy", ""),
-            row.get("Δval_accuracy", ""),
-            row.get("train_min", ""),
-            commit_link,
+        commit_id = row.get("commit_id", "")
+        short = commit_id[:7] if commit_id else ""
+        url = (
+            f"https://github.com/{REPO}/commit/{commit_id}"
+            if (REPO and commit_id)
+            else ""
+        )
+        commit_cell_html = (
+            f'<a href="{url}"><code>{html.escape(short)}</code></a>'
+            if url
+            else f"<code>{html.escape(short)}</code>"
+        )
+
+        cells = [
+            ts_cell,
+            f"<code>{html.escape(br)}</code>",
+            f"<code>{html.escape(au)}</code>",
+            f"<code>{html.escape(cause_row)}</code>",
+            fmt_val(va_raw),
+            fmt_arrow_from_value(delta_val),
+            fmt_dur(dur_row),
+            commit_cell_html,
         ]
 
-    # ---------- Section 3: Code ----------
-    code_lines = []
-    code_lines.append(f"- **Branch:** {latest_row.get('Branch', '')}")
-    code_lines.append(f"- **Author:** {latest_row.get('Author', '')}")
-    if base_url and latest_row.get("commit_id", ""):
-        sha_full = str(latest_row.get("commit_id", ""))
-        sha_short = sha_full[:7]
-        code_lines.append(f"- **Commit:** [{sha_short}]({base_url}/commit/{sha_full})")
-    else:
-        code_lines.append(f"- **Commit:** {latest_row.get('commit_id', '')}")
-    code_lines.append(f"- **Status:** {latest_row.get('status', '')}")
-    code_lines.append(
-        f"- **Trained model this run:** "
-        f"{latest_row.get('trained_model', latest_row.get('TRAINED', ''))}"
-    )
-    code_md = "\n".join(code_lines)
+        # sharp-change highlighting
+        try:
+            dv = float(delta_val)
+        except Exception:
+            dv = None
+        is_sharp = abs(dv) >= SHARP_DELTA if dv is not None else False
+        if is_sharp:
+            cells = [f"<strong><ins>{c}</ins></strong>" for c in cells]
 
-    # ---------- Section 4: Artifacts ----------
-    artifacts_rows = []
+        lines.append("<tr>")
+        for cell in cells:
+            lines.append(
+                "<td style='text-align:center; vertical-align:middle; "
+                "word-break:break-word; max-width:100%'>" + str(cell) + "</td>"
+            )
+        lines.append("</tr>")
+
+    lines.append("</tbody></table>\n")
+
+    # ---- Section 3: Code ----
+    lines.append("## 3) Code\n")
+    if BRANCH:
+        lines.append(f"- **Branch:** `{BRANCH}`")
+    if ACTOR:
+        lines.append(f"- **Author:** `{ACTOR}`")
+
+    if SHA and REPO:
+        msg = COMMIT_MSG or ""
+        lines.append(
+            f'- **Commit:** <a href="https://github.com/{REPO}/commit/{SHA}">'
+            f"<code>{SHA[:7]}</code> — {html.escape(msg)}</a>"
+        )
+
+    # Model source – we just look at TRAINED flag for now
+    if trained_flag:
+        lines.append("- **Model source in APK:** Trained in this run")
+
+    lines.append("- **Status:** Success")
+
+    job_end_str = ts_from_epoch(os.getenv("JOB_END", "")) if os.getenv("JOB_END") else ""
+    if job_end_str:
+        lines.append(f"- **Job finished at:** {job_end_str}")
+
+    # ---- Section 4: Artifacts ----
+    lines.append("\n## 4) Artifacts\n")
+    lines.append("| Artifact | Size |")
+    lines.append("|---|---:|")
+
+    artifact_entries = []
     for root in ["artifacts", ".mlops"]:
         if not os.path.isdir(root):
             continue
@@ -263,47 +356,33 @@ def main() -> None:
                 rel = p.as_posix()
                 if rel.endswith("commitHistory.csv"):
                     continue
-                size = p.stat().st_size
-                artifacts_rows.append({"Artifact": rel, "Size": size})
-    if artifacts_rows:
-        sec4_df = pd.DataFrame(artifacts_rows)
+                sz = p.stat().st_size
+                sz_kb = f"{sz/1024:.1f} KB" if sz else ""
+                artifact_entries.append((rel, sz_kb))
+
+    if artifact_entries:
+        for rel, sz_kb in artifact_entries:
+            lines.append(f"| [{rel}]({rel}) | {sz_kb} |")
     else:
-        sec4_df = pd.DataFrame(columns=["Artifact", "Size"])
+        lines.append("| _None_ | |")
 
-    # ---------- Section 5: Commit History ----------
-    history_link = csv_path.replace("\\", "/")
-
-    # ---------- Emit Markdown ----------
-    out.write("# Pipeline Summary\n\n")
-
-    # 1) Model in APK
-    out.write("## 1) Model in APK: from this workflow run\n\n")
-    out.write(to_md_table(sec1_df))
-    out.write("\n\n")
-
-    # 2) Performance
-    out.write("## 2) Model Performance (val_accuracy)\n\n")
-    out.write(chart_md + "\n\n")
-    out.write(to_md_table(sec2_df))
-    out.write("\n\n")
-
-    # 3) Code
-    out.write("## 3) Code\n\n")
-    out.write(code_md + "\n\n")
-
-    # 4) Artifacts
-    out.write("## 4) Artifacts\n\n")
-    if sec4_df.empty:
-        out.write("_None_\n\n")
+    # ---- Section 5: Commit History ----
+    gist_url = os.getenv("GIST_URL", "")
+    lines.append("\n## 5) Commit History\n")
+    if gist_url:
+        lines.append(f"- **Commit History:** [commitHistory.csv]({gist_url})")
+    elif csv_path:
+        rel = csv_path.replace("\\", "/")
+        lines.append(f"- **Commit History:** [{os.path.basename(rel)}]({rel})")
     else:
-        out.write(to_md_table(sec4_df) + "\n\n")
+        lines.append("- **Commit History:** `commitHistory.csv`")
 
-    # 5) Commit History
-    out.write("## 5) Commit History\n\n")
-    out.write(f"- Commit History: [{os.path.basename(history_link)}]({history_link})\n\n")
-    out.write("_Job summary generated at run-time_\n")
+    lines.append("\n_Job summary generated at run-time_\n")
 
-    sys.stdout.write(out.getvalue())
+    with open(SUMMARY, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+    print("Summary generated.")
 
 
 if __name__ == "__main__":
