@@ -1,0 +1,47 @@
+name: devops-mlops-report (fixed)
+
+on:
+  workflow_call:
+    inputs:
+      config_path:
+        required: true
+        type: string
+    secrets:
+      GIST_TOKEN:
+        required: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Checkout the caller repo (mlops-ci-demo) to read report-config.yml
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          path: caller
+
+      # 2) Checkout this repo (devops-mlops-report) to run scripts
+      - name: Checkout devops-mlops-report
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.action_repository }}
+          path: app
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Phase 2 Step 1 — Persist CSV + Render Summary Skeleton
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          CONFIG_PATH: ${{ inputs.config_path }}
+        run: |
+          python app/scripts/phase2_step1.py \
+            --config caller/${CONFIG_PATH}
