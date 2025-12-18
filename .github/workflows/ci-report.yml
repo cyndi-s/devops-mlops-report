@@ -39,9 +39,10 @@ jobs:
           pip install pyyaml
 
       - name: Phase 2 Step 1 — Persist CSV + Render Summary Skeleton
+        working-directory: app
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           CONFIG_PATH: ${{ inputs.config_path }}
         run: |
-          python app/scripts/phase2_step1.py \
-            --config caller/${CONFIG_PATH}
+          python scripts/phase2_step1.py \
+            --config ../caller/${CONFIG_PATH}
