@@ -32,5 +32,5 @@ The system is designed to be lightweight, repository-driven, and backend-free.
 
 ## Author
 
-Yuxin (Cyndia) Su 
+**Yuxin (Cyndia) Su** 
 York University
