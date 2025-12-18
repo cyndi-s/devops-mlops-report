@@ -28,6 +28,9 @@ how DevOps and MLOps signals can be unified and reported at the CI level.
 
 The system is designed to be lightweight, repository-driven, and backend-free.
 
+Formal problem formulation, evaluation, and analysis will be presented separately.
+
+
 ---
 
 ## Author
