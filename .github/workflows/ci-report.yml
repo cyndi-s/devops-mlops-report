@@ -27,6 +27,14 @@ jobs:
         with:
           repository: ${{ github.action_repository }}
           path: app
+          
+      - name: Show app repo identity
+        run: |
+            echo "== caller repo =="
+            cat caller/.git/config | sed -n 's/.*url = //p'
+            echo "== app repo =="
+            cat app/.git/config | sed -n 's/.*url = //p'
+
 
       - name: Setup Python
         uses: actions/setup-python@v5
