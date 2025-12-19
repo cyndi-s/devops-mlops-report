@@ -44,5 +44,5 @@ jobs:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           CONFIG_PATH: ${{ inputs.config_path }}
         run: |
-          python ./github/scripts/phase2_step1.py \
+          python .github/scripts/phase2_step1.py \
             --config ../caller/${CONFIG_PATH}
