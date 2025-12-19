@@ -32,6 +32,8 @@ jobs:
 
       - name: Setup Python
         uses: actions/setup-python@v5
+        env:
+            WORKFLOW_STATUS: ${{ job.status }}
         with:
           python-version: "3.11"
 

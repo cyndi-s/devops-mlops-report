@@ -13,6 +13,18 @@ from zoneinfo import ZoneInfo
 import yaml
 
 CSV_NAME = "commitHistory.csv"
+FIXED_MLFLOW_MISSING_MSG = """
+MLflow project not detected
+No MLproject file was found in this repository.
+
+The `devops-mlops-report` expects an MLflow Project with MLflow runs
+(metrics and params logged to an MLflow tracking server).
+
+You can generate an MLproject file using the GoMLOps tool.
+
+After adding `MLproject` file and `arg2pipeline/` folder,
+re-run this workflow.
+"""
 
 
 # ---------- GitHub Gist helpers ----------
@@ -237,8 +249,16 @@ def write_summary(
     gist_url: str,
     mlflow_project_detected: bool,
     missing_reason: str,
-    changed_files: list[str],
+    fixed_mlflow_missing_msg: str,
     cause: str,
+    branch: str,
+    author: str,
+    commit_url: str,
+    commit_sha: str,
+    commit_msg: str,
+    model_source_in_apk: str,
+    workflow_status: str,
+    finished_at: str,
 ) -> None:
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
@@ -247,32 +267,42 @@ def write_summary(
     with open(summary_path, "a", encoding="utf-8") as f:
         f.write("# devops-mlops-report\n\n")
 
+        # -------- Section 1 --------
         f.write("## Section 1 — Latest Model\n\n")
-        f.write("Placeholder (Step 2: MLflow run extraction not implemented yet)\n\n")
+        if not mlflow_project_detected:
+            # Your REQUIRED fixed message (2.2)
+            f.write("```text\n")
+            f.write(fixed_mlflow_missing_msg.strip() + "\n")
+            f.write("```\n\n")
+            f.write("_Latest model is unchanged because MLOps processing is disabled._\n\n")
+        else:
+            f.write("Placeholder (Step 2: MLflow run extraction not implemented yet)\n\n")
+            f.write(f"- Cause attribution (preview): **{cause or 'N/A'}**\n\n")
 
+        # -------- Section 2 --------
         f.write("## Section 2 — Model Performance Trend\n\n")
         f.write("Placeholder (Step 2: trend SVG not implemented yet)\n\n")
 
-        f.write("## Section 3 — Code (DevOps)\n\n")
-        f.write(f"- MLflow project detected: **{ 'Yes' if mlflow_project_detected else 'No' }**\n")
-        if not mlflow_project_detected and missing_reason:
-            f.write(f"- Reason: {missing_reason}\n")
-        f.write(f"- Cause attribution: **{cause or 'N/A'}**\n")
-        f.write(f"- Changed files (this commit): **{len(changed_files)}**\n")
-        if changed_files:
-            show = changed_files[:20]
-            f.write("\n<details><summary>Show changed files</summary>\n\n")
-            for cf in show:
-                f.write(f"- `{cf}`\n")
-            if len(changed_files) > 20:
-                f.write(f"\n... +{len(changed_files) - 20} more\n")
-            f.write("\n</details>\n\n")
+        # -------- Section 3 (MUST be DevOps context) --------
+        f.write("## Section 3 — Code\n\n")
+        f.write(f"- Branch: `{branch}`\n")
+        f.write(f"- Author: `{author}`\n")
+        if commit_url:
+            f.write(f"- Commit: [{commit_sha[:7]}]({commit_url}) — {commit_msg}\n")
+        else:
+            f.write(f"- Commit: {commit_sha[:7]} — {commit_msg}\n")
+        f.write(f"- Model source in APK: {model_source_in_apk}\n")
+        f.write(f"- Status: {workflow_status}\n")
+        f.write(f"- Job finished at: {finished_at}\n\n")
 
+        # -------- Section 4 --------
         f.write("## Section 4 — Artifacts\n\n")
         f.write("Placeholder (Step 2)\n\n")
 
+        # -------- Section 5 --------
         f.write("## Section 5 — Commit History\n\n")
         f.write(f"Gist link: {gist_url}\n\n")
+
 
 
 def main():
@@ -280,6 +310,7 @@ def main():
     ap.add_argument("--config", required=True, help="Path to report-config.yml in caller repo")
     ap.add_argument("--caller-root", default="../caller", help="Caller repo checkout path (relative to app/)")
     args = ap.parse_args()
+    
 
     token = os.environ.get("GIST_TOKEN")
     if not token:
@@ -314,6 +345,20 @@ def main():
     branch = os.environ.get("GITHUB_REF_NAME", "")
     actor = os.environ.get("GITHUB_ACTOR", "")
 
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    commit_url = f"{server_url}/{repo}/commit/{sha}" if repo and sha else ""
+
+    commit_msg = ""
+    try:
+        commit_msg = run_git(caller_root, ["log", "-1", "--pretty=%s", sha]) if sha else ""
+    except Exception:
+        pass
+
+    job_status = os.environ.get("WORKFLOW_STATUS", "success")  # pass from YAML
+    finished_at = dt.datetime.now(ZoneInfo("America/Toronto")).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
     changed_files = get_changed_files_single_commit(caller_root, sha) if sha else []
 
     script_path = None
@@ -330,15 +375,16 @@ def main():
 
     if mlflow_project_detected:
         script_from_mlproject = parse_mlproject_for_script(mlproject)
-        script_from_pipeline, data_paths = (None, [])
-    if path_exists(pipeline_json):
-        script_from_pipeline, data_paths = parse_pipeline_for_script_and_data(pipeline_json)
 
+        script_from_pipeline, data_paths = (None, [])
+        if path_exists(pipeline_json):
+            script_from_pipeline, data_paths = parse_pipeline_for_script_and_data(pipeline_json)
 
         # Prefer MLproject script if found; else pipeline script.
         script_path = script_from_mlproject or script_from_pipeline
 
         cause, dbg = classify_cause(changed_files, script_path, data_paths)
+
 
     # Step 2 still DevOps-only row (no MLflow run association yet)
     is_trained = "No"
@@ -380,12 +426,21 @@ def main():
     update_gist_file(gist_id, token, CSV_NAME, updated)
 
     write_summary(
-        gist_url=gist_url,
-        mlflow_project_detected=mlflow_project_detected,
-        missing_reason=missing_reason,
-        changed_files=changed_files,
-        cause=cause,
+    gist_url=gist_url,
+    mlflow_project_detected=mlflow_project_detected,
+    missing_reason=missing_reason,
+    fixed_mlflow_missing_msg=FIXED_MLFLOW_MISSING_MSG,
+    cause=cause,
+    branch=branch,
+    author=actor,
+    commit_url=commit_url,
+    commit_sha=sha,
+    commit_msg=commit_msg,
+    model_source_in_apk="Unknown (not implemented yet)",
+    workflow_status=job_status,
+    finished_at=finished_at,
     )
+
 
     print(f"Updated {CSV_NAME} in gist: {gist_url}")
 
