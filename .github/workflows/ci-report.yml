@@ -25,9 +25,10 @@ jobs:
       - name: Checkout devops-mlops-report
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.action_repository }}
+          repository: cyndi-s/devops-mlops-report
+          ref: main
           path: app
-          
+
       - name: Show app repo identity
         run: |
             echo "== caller repo =="
