@@ -20,6 +20,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           path: caller
+          fetch-depth: 0
 
       # 2) Checkout this repo (devops-mlops-report) to run scripts
       - name: Checkout devops-mlops-report
@@ -28,14 +29,6 @@ jobs:
           repository: cyndi-s/devops-mlops-report
           ref: main
           path: app
-
-      - name: Show app repo identity
-        run: |
-            echo "== caller repo =="
-            cat caller/.git/config | sed -n 's/.*url = //p'
-            echo "== app repo =="
-            cat app/.git/config | sed -n 's/.*url = //p'
-
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -47,32 +40,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyyaml
 
-      - name: Debug checkout paths
-        run: |
-            echo "PWD:"
-            pwd
-            echo ""
-            echo "Workspace root:"
-            ls -la
-            echo ""
-            echo "caller/ exists?"
-            ls -la caller || true
-            echo ""
-            echo "app/ exists?"
-            ls -la app || true
-            echo ""
-            echo "app/.github exists?"
-            ls -la app/.github || true
-            echo ""
-            echo "app/.github/scripts exists?"
-            ls -la app/.github/scripts || true
-
-
-      - name: Phase 2 Step 1 — Persist CSV + Render Summary Skeleton
+     
+      - name: Phase 2 Step 2 — — Detect MLflow project + Cause Attribution + Persist DevOps row
         working-directory: app
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           CONFIG_PATH: ${{ inputs.config_path }}
         run: |
-          python .github/scripts/phase2_step1.py \
+          python .github/scripts/phase2_step2.py \
             --config ../caller/${CONFIG_PATH}
