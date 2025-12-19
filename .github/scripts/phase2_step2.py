@@ -426,19 +426,19 @@ def main():
     update_gist_file(gist_id, token, CSV_NAME, updated)
 
     write_summary(
-    gist_url=gist_url,
-    mlflow_project_detected=mlflow_project_detected,
-    missing_reason=missing_reason,
-    fixed_mlflow_missing_msg=FIXED_MLFLOW_MISSING_MSG,
-    cause=cause,
-    branch=branch,
-    author=actor,
-    commit_url=commit_url,
-    commit_sha=sha,
-    commit_msg=commit_msg,
-    model_source_in_apk="Unknown (not implemented yet)",
-    workflow_status=job_status,
-    finished_at=finished_at,
+        gist_url=gist_url,
+        mlflow_project_detected=mlflow_project_detected,
+        missing_reason=missing_reason,
+        fixed_mlflow_missing_msg=FIXED_MLFLOW_MISSING_MSG,
+        cause=cause,
+        branch=branch,
+        author=actor,
+        commit_url=commit_url,
+        commit_sha=sha,
+        commit_msg=commit_msg,
+        model_source_in_apk="Unknown (not implemented yet)",
+        workflow_status=job_status,
+        finished_at=finished_at,
     )
 
 
