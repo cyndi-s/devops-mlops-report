@@ -301,7 +301,7 @@ def write_summary(
 
         # -------- Section 5 --------
         f.write("## Section 5 — Commit History\n\n")
-        f.write(f"Gist link: {gist_url}\n\n")
+        f.write(f"- **Commit History:** [commitHistory.csv]({gist_url})\n\n")
 
 
 
