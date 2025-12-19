@@ -38,6 +38,27 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyyaml
 
+      - name: Debug checkout paths
+        run: |
+            echo "PWD:"
+            pwd
+            echo ""
+            echo "Workspace root:"
+            ls -la
+            echo ""
+            echo "caller/ exists?"
+            ls -la caller || true
+            echo ""
+            echo "app/ exists?"
+            ls -la app || true
+            echo ""
+            echo "app/.github exists?"
+            ls -la app/.github || true
+            echo ""
+            echo "app/.github/scripts exists?"
+            ls -la app/.github/scripts || true
+
+
       - name: Phase 2 Step 1 — Persist CSV + Render Summary Skeleton
         working-directory: app
         env:
