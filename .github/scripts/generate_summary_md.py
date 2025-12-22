@@ -6,12 +6,12 @@ import os
 FIXED_MLFLOW_MISSING_MSG_MD = """
 **MLflow project not detected**
 
-Required files are missing in this repository.
+No `MLproject` file was found in this repository.
 
 The `devops-mlops-report` expects an MLflow Project with MLflow runs
 (metrics and params logged to an MLflow tracking server).
 
-You can generate an `MLproject` file using the [GoMLOps](https://github.com/cyndi-s/GoMLOps) tool.
+You can generate an MLproject file using the [GoMLOps](https://github.com/yorku-ease/GoMLOps) tool.
 
 After adding `MLproject` file and `arg2pipeline/` folder, re-run this workflow.
 """.strip()
