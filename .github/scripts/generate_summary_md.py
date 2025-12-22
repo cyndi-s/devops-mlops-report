@@ -1,0 +1,84 @@
+import argparse
+import json
+import os
+
+
+FIXED_MLFLOW_MISSING_MSG_MD = """
+**MLflow project not detected**
+
+Required files are missing in this repository.
+
+The `devops-mlops-report` expects an MLflow Project with MLflow runs
+(metrics and params logged to an MLflow tracking server).
+
+You can generate an `MLproject` file using the [GoMLOps](https://github.com/cyndi-s/GoMLOps) tool.
+
+After adding `MLproject` file and `arg2pipeline/` folder, re-run this workflow.
+""".strip()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--gist-url", required=True)
+    ap.add_argument("--detect-json", required=True)
+    ap.add_argument("--devops-json", required=True)
+    args = ap.parse_args()
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+
+    with open(args.detect_json, "r", encoding="utf-8") as f:
+        det = json.load(f)
+
+    with open(args.devops_json, "r", encoding="utf-8") as f:
+        dev = json.load(f)
+
+    mlflow_project_detected = bool(det.get("mlflow_project_detected"))
+    missing_reason = (det.get("missing_reason") or "").strip()
+
+    with open(summary_path, "a", encoding="utf-8") as f:
+        f.write("# devops-mlops-report\n\n")
+
+        # Section 1
+        f.write("## Section 1 — Latest Model\n\n")
+        if not mlflow_project_detected:
+            f.write(FIXED_MLFLOW_MISSING_MSG_MD + "\n\n")
+            if missing_reason:
+                f.write(f"_Detected issue: {missing_reason}_\n\n")
+        else:
+            f.write("Placeholder (Step 2: MLflow run extraction not implemented yet)\n\n")
+
+        # Section 2 (not gated)
+        f.write("## Section 2 — Model Performance Trend\n\n")
+        f.write("Placeholder (Step 2: trend SVG not implemented yet)\n\n")
+
+        # Section 3
+        f.write("## Section 3 — Code\n\n")
+        f.write(f"- Branch: `{dev.get('branch', '')}`\n")
+        f.write(f"- Author: `{dev.get('author', '')}`\n")
+
+        commit_sha = dev.get("commit_sha", "")
+        commit_msg = dev.get("commit_msg", "")
+        commit_url = dev.get("commit_url", "")
+
+        if commit_url and commit_sha:
+            f.write(f"- Commit: [{commit_sha[:7]}]({commit_url}) — {commit_msg}\n")
+        else:
+            f.write(f"- Commit: {commit_sha[:7]} — {commit_msg}\n")
+
+        f.write(f"- Model source in APK: {dev.get('model_source_in_apk', 'Unknown (not implemented yet)')}\n")
+        f.write(f"- Status: {dev.get('status', '')}\n")
+        f.write(f"- Job finished at: {dev.get('finished_at', '')}\n\n")
+
+        # Section 4
+        f.write("## Section 4 — Artifacts\n\n")
+        f.write("Placeholder (Step 2)\n\n")
+
+        # Section 5
+        f.write("## Section 5 — Commit History\n\n")
+        f.write(f"- **Commit History:** [commitHistory.csv]({args.gist_url})\n\n")
+
+
+if __name__ == "__main__":
+    main()
