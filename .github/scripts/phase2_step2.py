@@ -21,7 +21,7 @@ No `MLproject` file was found in this repository.
 The `devops-mlops-report` expects an MLflow Project with MLflow runs
 (metrics and params logged to an MLflow tracking server).
 
-You can generate an MLproject file using the [GoMLOps] (https://github.com/yorku-ease/GoMLOps) tool.
+You can generate an MLproject file using the [GoMLOps](https://github.com/yorku-ease/GoMLOps) tool.
 
 After adding `MLproject` file and `arg2pipeline/` folder, re-run this workflow.
 """.strip()
