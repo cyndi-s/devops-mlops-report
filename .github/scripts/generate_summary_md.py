@@ -21,6 +21,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gist-url", required=True)
     ap.add_argument("--detect-json", required=True)
+    ap.add_argument("--mlflow-json", required=True)
     ap.add_argument("--devops-json", required=True)
     args = ap.parse_args()
 
@@ -30,6 +31,9 @@ def main():
 
     with open(args.detect_json, "r", encoding="utf-8") as f:
         det = json.load(f)
+
+    with open(args.mlflow_json, "r", encoding="utf-8") as f:
+        ml = json.load(f)
 
     with open(args.devops_json, "r", encoding="utf-8") as f:
         dev = json.load(f)
@@ -47,6 +51,15 @@ def main():
             if missing_reason:
                 f.write(f"_Detected issue: {missing_reason}_\n\n")
         else:
+            is_trained = ml.get("is_trained", "No")
+            run_id = (ml.get("run_id") or "").strip()
+
+            f.write(f"- Training detected: **{is_trained}**\n")
+            if run_id:
+                f.write(f"- MLflow run id: `{run_id}`\n\n")
+            else:
+                f.write("\n")
+
             f.write("Placeholder (Step 2: MLflow run extraction not implemented yet)\n\n")
 
         # Section 2 (not gated)

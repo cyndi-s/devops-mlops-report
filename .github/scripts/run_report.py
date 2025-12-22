@@ -68,6 +68,7 @@ def main():
     # 1.5) Training detection (Phase 2.3) — uniquely identify current MLflow run
     sh(["python", ".github/scripts/extract_mlflow.py",
         "--config", args.config,
+        "--sha", sha,
         "--out", mlflow_json])
 
     with open(mlflow_json, "r", encoding="utf-8") as f:
@@ -133,6 +134,7 @@ def main():
     sh(["python", ".github/scripts/generate_summary_md.py",
         "--gist-url", gist_url,
         "--detect-json", detect_json,
+        "--mlflow-json", mlflow_json,
         "--devops-json", devops_json])
 
 
