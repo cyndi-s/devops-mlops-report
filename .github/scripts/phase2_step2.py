@@ -13,18 +13,18 @@ from zoneinfo import ZoneInfo
 import yaml
 
 CSV_NAME = "commitHistory.csv"
-FIXED_MLFLOW_MISSING_MSG = """
-MLflow project not detected
-No MLproject file was found in this repository.
+FIXED_MLFLOW_MISSING_MSG_MD = """
+**MLflow project not detected**
+
+No `MLproject` file was found in this repository.
 
 The `devops-mlops-report` expects an MLflow Project with MLflow runs
 (metrics and params logged to an MLflow tracking server).
 
-You can generate an MLproject file using the GoMLOps tool.
+You can generate an MLproject file using the [GoMLOps] (https://github.com/yorku-ease/GoMLOps) tool.
 
-After adding `MLproject` file and `arg2pipeline/` folder,
-re-run this workflow.
-"""
+After adding `MLproject` file and `arg2pipeline/` folder, re-run this workflow.
+""".strip()
 
 
 # ---------- GitHub Gist helpers ----------
@@ -271,9 +271,7 @@ def write_summary(
         f.write("## Section 1 — Latest Model\n\n")
         if not mlflow_project_detected:
             # Your REQUIRED fixed message (2.2)
-            f.write("```text\n")
-            f.write(fixed_mlflow_missing_msg.strip() + "\n")
-            f.write("```\n\n")
+            f.write(fixed_mlflow_missing_msg.strip() + "\n\n")
             f.write("_Latest model is unchanged because MLOps processing is disabled._\n\n")
         else:
             f.write("Placeholder (Step 2: MLflow run extraction not implemented yet)\n\n")
@@ -429,9 +427,9 @@ def main():
         gist_url=gist_url,
         mlflow_project_detected=mlflow_project_detected,
         missing_reason=missing_reason,
-        fixed_mlflow_missing_msg=FIXED_MLFLOW_MISSING_MSG,
+        fixed_mlflow_missing_msg=FIXED_MLFLOW_MISSING_MSG_MD,
         cause=cause,
-        branch=branch,
+        branch=branch,       
         author=actor,
         commit_url=commit_url,
         commit_sha=sha,
