@@ -6,6 +6,10 @@ on:
       config_path:
         required: true
         type: string
+      mlflow_run_id:
+        required: false
+        type: string
+        default: ""
     secrets:
       GIST_TOKEN:
         required: true
@@ -49,6 +53,7 @@ jobs:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           CONFIG_PATH: ${{ inputs.config_path }}
           WORKFLOW_STATUS: ${{ job.status }}
+          MLFLOW_RUN_ID: ${{ inputs.mlflow_run_id }}
         run: |
           python .github/scripts/run_report.py \
             --config ../caller/${CONFIG_PATH}
