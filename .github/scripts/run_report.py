@@ -52,6 +52,7 @@ def main():
     os.makedirs(workdir, exist_ok=True)
 
     detect_json = os.path.join(workdir, "detect.json")
+    mlflow_json = os.path.join(workdir, "mlflow.json")
     devops_json = os.path.join(workdir, "devops.json")
     row_json = os.path.join(workdir, "row.json")
 
@@ -63,6 +64,14 @@ def main():
 
     with open(detect_json, "r", encoding="utf-8") as f:
         det = json.load(f)
+
+    # 1.5) Training detection (Phase 2.3) — uniquely identify current MLflow run
+    sh(["python", ".github/scripts/extract_mlflow.py",
+        "--config", args.config,
+        "--out", mlflow_json])
+
+    with open(mlflow_json, "r", encoding="utf-8") as f:
+        ml = json.load(f)
 
     # 2) Prepare DevOps payload for summary (tested format)
     devops_payload = {
@@ -96,6 +105,7 @@ def main():
         "data_paths",
         "script_hit",
         "data_hit",
+        "mlflow_run_id",
     ]
 
     row = {
@@ -106,9 +116,10 @@ def main():
         "commit_message": commit_msg,
         "workflow_status": status,
         "mlflow_project_detected": "Yes" if det.get("mlflow_project_detected") else "No",
-        "is_trained": "No",  # Phase 2.3 will update
+        "is_trained": ml.get("is_trained", "No"),  # Phase 2.3 will update
         "cause": det.get("cause", ""),
         **(det.get("dbg", {}) or {}),
+        "mlflow_run_id": ml.get("run_id", ""),
     }
 
     with open(row_json, "w", encoding="utf-8") as f:
