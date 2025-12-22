@@ -43,11 +43,12 @@ jobs:
           pip install pyyaml
 
      
-      - name: Phase 2 Step 2 — — Detect MLflow project + Cause Attribution + Persist DevOps row
+      - name: Run devops-mlops-report
         working-directory: app
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           CONFIG_PATH: ${{ inputs.config_path }}
+          WORKFLOW_STATUS: ${{ job.status }}
         run: |
-          python .github/scripts/phase2_step2.py \
+          python .github/scripts/run_report.py \
             --config ../caller/${CONFIG_PATH}
