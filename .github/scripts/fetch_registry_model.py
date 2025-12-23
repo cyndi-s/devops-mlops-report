@@ -1,0 +1,1 @@
+# fetch_registry_model.py
