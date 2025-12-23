@@ -6,12 +6,14 @@ on:
       config_path:
         required: true
         type: string
-      mlflow_run_id:
-        required: false
-        type: string
-        default: ""
     secrets:
       GIST_TOKEN:
+        required: true
+      DAGSHUB_USERNAME:
+        required: true
+      DAGSHUB_TOKEN:
+        required: true
+      MLFLOW_TRACKING_URI:
         required: true
 
 jobs:
@@ -48,7 +50,7 @@ jobs:
 
      
       - name: Run devops-mlops-report
-        working-directory: app mlflow pandas
+        working-directory: app
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           CONFIG_PATH: ${{ inputs.config_path }}
@@ -56,6 +58,7 @@ jobs:
           # DagsHub / MLflow server auth (works for enterprise MLflow too)
           MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
           python .github/scripts/run_report.py \
             --config ../caller/${CONFIG_PATH}
