@@ -90,11 +90,6 @@ def main() -> int:
             payload["should_train"] = True
             payload["run_id"] = ""
             payload["reason"] = f"training failed: {type(e).__name__}: {e}"
-        payload["run_id"] = run_id
-        if not run_id:
-            payload["reason"] = "training finished but run_id not returned by MLflow Projects"
-        else:
-            payload["reason"] = "training triggered and run_id captured"
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
