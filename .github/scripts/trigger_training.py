@@ -19,11 +19,25 @@ def ensure_repo_name_symlink(caller_root: str) -> str:
     workspace = os.path.dirname(os.path.abspath(caller_root))  # parent of .../caller
     compat_root = os.path.join(workspace, repo_name)
 
-    if not os.path.exists(compat_root):
+    target = os.path.abspath(caller_root)
+
+    if os.path.islink(compat_root):
+        # ensure it points to caller_root
         try:
-            os.symlink(os.path.abspath(caller_root), compat_root)
+            if os.readlink(compat_root) != target:
+                os.unlink(compat_root)
+                os.symlink(target, compat_root)
+        except OSError:
+            pass
+    elif os.path.exists(compat_root):
+        # exists but is not a symlink (folder/file). leave it; fallback to caller_root
+        return target
+    else:
+        try:
+            os.symlink(target, compat_root)
         except FileExistsError:
             pass
+
     return compat_root
 
 def load_cfg(path: str) -> dict:
@@ -58,28 +72,24 @@ def main() -> int:
 
         # MLflow must be installed in the runner environment
         import mlflow  # type: ignore
-
-        # Optional: set tracking URI from config/env (prefer env set by workflow)
-        # cfg = load_cfg(args.config)  # not required here if env already has MLFLOW_TRACKING_URI
-        # If you store tracking_uri in config and want to enforce:
-        # tracking_uri = (cfg.get("mlflow") or {}).get("tracking_uri", "")
-        # if tracking_uri:
-        #     mlflow.set_tracking_uri(tracking_uri)
-
-        # Trigger MLflow Project entry point in caller repo.
-        # This honors MLproject + conda_env if your runner supports conda env manager.
         compat_root = ensure_repo_name_symlink(caller_root)
 
-        submitted = mlflow.projects.run(
-            uri=compat_root,   # IMPORTANT: run from <workspace>/<repo_name>
-            entry_point="main",
-            parameters={},
-            env_manager="local",   # keep as you have it for now
-            synchronous=True,
-        )
-
-
-        run_id = getattr(submitted, "run_id", "") or ""
+        try:
+            submitted = mlflow.projects.run(
+                uri=compat_root,
+                entry_point="main",
+                parameters={},
+                env_manager="local",
+                synchronous=True,
+            )
+            run_id = getattr(submitted, "run_id", "") or ""
+            payload["run_id"] = run_id
+            payload["reason"] = "training triggered and run_id captured" if run_id else \
+                "training finished but run_id not returned by MLflow Projects"
+        except Exception as e:
+            payload["should_train"] = True
+            payload["run_id"] = ""
+            payload["reason"] = f"training failed: {type(e).__name__}: {e}"
         payload["run_id"] = run_id
         if not run_id:
             payload["reason"] = "training finished but run_id not returned by MLflow Projects"
