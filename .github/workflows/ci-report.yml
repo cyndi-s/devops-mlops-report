@@ -9,12 +9,9 @@ on:
     secrets:
       GIST_TOKEN:
         required: true
-      DAGSHUB_USERNAME:
-        required: true
       DAGSHUB_TOKEN:
         required: true
-      MLFLOW_TRACKING_URI:
-        required: true
+      
 
 jobs:
   report:
@@ -55,10 +52,8 @@ jobs:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           CONFIG_PATH: ${{ inputs.config_path }}
           WORKFLOW_STATUS: ${{ job.status }}
-          # DagsHub / MLflow server auth (works for enterprise MLflow too)
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+          MLFLOW_TRACKING_USERNAME: ${{ github.repository_owner }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
           python .github/scripts/run_report.py \
             --config ../caller/${CONFIG_PATH}

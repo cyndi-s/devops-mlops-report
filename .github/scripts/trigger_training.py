@@ -72,6 +72,11 @@ def main() -> int:
 
         # MLflow must be installed in the runner environment
         import mlflow  # type: ignore
+        
+        cfg = load_cfg(args.config)
+        tracking_uri = ((cfg.get("mlflow") or {}).get("tracking_uri") or "").strip()
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
         compat_root = ensure_repo_name_symlink(caller_root)
 
         try:
