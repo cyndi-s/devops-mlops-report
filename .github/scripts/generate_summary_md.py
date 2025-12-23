@@ -53,14 +53,17 @@ def main():
         else:
             is_trained = ml.get("is_trained", "No")
             run_id = (ml.get("run_id") or "").strip()
+            reason = (ml.get("reason") or "").strip()
 
             f.write(f"- Training detected: **{is_trained}**\n")
             if run_id:
-                f.write(f"- MLflow run id: `{run_id}`\n\n")
-            else:
-                f.write("\n")
+                f.write(f"- MLflow run id: `{run_id}`\n")
+            if reason and is_trained != "Yes":
+                f.write(f"- Note: {reason}\n")
+            f.write("\n")
 
-            f.write("Placeholder (Step 2: MLflow run extraction not implemented yet)\n\n")
+            if is_trained == "Yes":
+                f.write("Placeholder (Step 2: MLflow run extraction not implemented yet)\n\n")
 
         # Section 2 (not gated)
         f.write("## Section 2 — Model Performance Trend\n\n")
