@@ -7,7 +7,6 @@ REPO = os.getenv("GITHUB_REPOSITORY", "")
 SHA = os.getenv("GITHUB_SHA", "")
 BRANCH_ENV = os.getenv("GITHUB_REF_NAME", "")
 ACTOR_ENV = os.getenv("GITHUB_ACTOR", "")
-CSV_URL = os.getenv("COMMIT_CSV_RAW_URL", "")
 
 # Not always present; keep as optional fallback
 COMMIT_MSG_ENV = os.getenv("GITHUB_EVENT_HEAD_COMMIT_MESSAGE", "")
@@ -112,15 +111,12 @@ def main():
 
         # Section 5
         f.write("## Section 5 — Commit History\n\n")
-        # if CSV_URL:
-        #     f.write(f"- **Commit History:** [commitHistory.csv]({CSV_URL})\n")
-        # else:
-        #     gist_url = (args.gist_url or "").strip().strip('"').strip("'").rstrip("/")
-        #     gist_id = gist_url.split("/")[-1] if gist_url else ""
-        #     if gist_id:
-        #         f.write(f"- **Commit History:** [commitHistory.csv](https://gist.github.com/{gist_id})\n")
-        #     else:
-        #         f.write("- **Commit History:** commitHistory.csv\n")
-        f.write(f"- **Commit History:** [commitHistory.csv]({CSV_URL})\n")
+
+        gist_url = (args.gist_url or "").strip().strip('"').strip("'").rstrip("/")
+        gist_id = gist_url.split("/")[-1] if gist_url else ""
+        if gist_id:
+            f.write(f"- **Commit History:** [commitHistory.csv](https://gist.github.com/{gist_id})\n")
+        else:
+            f.write("- **Commit History:** commitHistory.csv\n")
 if __name__ == "__main__":
     main()
