@@ -74,15 +74,14 @@ def main():
         f.write(f"- Branch: `{dev.get('branch', '')}`\n")
         f.write(f"- Author: `{dev.get('author', '')}`\n")
 
-        short_sha = (dev.get("commit_sha") or "")[:7]
-        commit_msg = (dev.get("commit_msg") or "").strip()
-        commit_url = (dev.get("commit_url") or "").strip()
+        commit_sha = dev.get("commit_sha", "")
+        commit_msg = dev.get("commit_msg", "")
+        commit_url = dev.get("commit_url", "")
 
-        if commit_url:
-            f.write(f"- Commit: [{short_sha} — {commit_msg}]({commit_url})\n")
+        if commit_url and commit_sha:
+            f.write(f"- Commit: [{commit_sha[:7]}]({commit_url}) — {commit_msg}\n")
         else:
-            f.write(f"- Commit: {short_sha} — {commit_msg}\n")
-
+            f.write(f"- Commit: {commit_sha[:7]} — {commit_msg}\n")
 
         f.write(f"- Model source in APK: {dev.get('model_source_in_apk', 'Unknown (not implemented yet)')}\n")
         f.write(f"- Status: {dev.get('status', '')}\n")
@@ -94,7 +93,8 @@ def main():
 
         # Section 5
         f.write("## Section 5 — Commit History\n\n")
-        f.write(f"- Commit History: [commitHistory.csv]({gist_url})\n\n")
+        f.write(f"- **Commit History:** [commitHistory.csv]({args.gist_url})\n\n")
+
 
 if __name__ == "__main__":
     main()
