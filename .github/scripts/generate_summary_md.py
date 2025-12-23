@@ -72,7 +72,14 @@ def main():
         # Section 3
         f.write("## Section 3 — Code\n\n")
         f.write(f"- Branch: `{dev.get('branch', '')}`\n")
-        f.write(f"- Author: `{dev.get('author', '')}`\n")
+        author = dev.get("author", "")
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+
+        if author:
+            f.write(f"- Author: [{author}]({server}/{author})\n")
+        else:
+            f.write("- Author: \n")
 
         commit_sha = dev.get("commit_sha", "")
         commit_msg = dev.get("commit_msg", "")
@@ -94,8 +101,10 @@ def main():
 
         # Section 5
         f.write("## Section 5 — Commit History\n\n")
-        f.write(f"- **Commit History:** [commitHistory.csv]({args.gist_url})\n")
-
-
+        gist_url = args.gist_url.rstrip("/")
+        f.write(
+            f"- **Commit History:** "
+            f"[commitHistory.csv]({gist_url}#file-commithistory-csv)\n"
+        )
 if __name__ == "__main__":
     main()
