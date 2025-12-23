@@ -83,11 +83,11 @@ def main():
         # Section 3
         f.write("## Section 3 — Code\n\n")
 
-        branch = (BRANCH_ENV or dev.get("branch", "") or "").strip()
-        author = (ACTOR_ENV or dev.get("author", "") or "").strip()
+        branch = BRANCH_ENV.strip()
+        author = ACTOR_ENV.strip()
 
-        commit_sha = (SHA or dev.get("commit_sha", "") or "").strip()
-        commit_url = (commit_url_env or dev.get("commit_url", "") or "").strip()
+        commit_sha = SHA.strip()
+        commit_url = commit_url_env.strip()
 
         commit_msg = (dev.get("commit_msg", "") or "").strip()
         if not commit_msg:
