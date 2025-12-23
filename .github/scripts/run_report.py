@@ -55,34 +55,47 @@ def main():
     mlflow_json = os.path.join(workdir, "mlflow.json")
     devops_json = os.path.join(workdir, "devops.json")
     row_json = os.path.join(workdir, "row.json")
+    train_json = os.path.join(workdir, "train.json")
+    ml_details_json = os.path.join(workdir, "ml_details.json")
 
     # 1) Detect MLflow project + cause attribution (tested)
-    sh(["python", ".github/scripts/detect_cause_mlops.py",
-        "--caller-root", caller_root,
-        "--sha", sha,
-        "--out", detect_json])
-    
-    # Trigger training (Phase 2.3 prerequisite)
+    sh([
+    "python", ".github/scripts/detect_cause_mlops.py",
+    "--caller-root", caller_root,
+    "--sha", sha,
+    "--out", detect_json
+    ])
+
+    with open(detect_json, "r", encoding="utf-8") as f:
+        det = json.load(f)
+        
+    # Decide whether to trigger training (toggle)
+    cause = (det.get("cause") or "").strip()
+    mlflow_project_detected = bool(det.get("mlflow_project_detected"))
+
+    # 1.5) Trigger training (Phase 2.3) and capture run_id (NO commit-tag query)
     sh([
         "python", ".github/scripts/trigger_training.py",
         "--config", args.config,
         "--caller-root", caller_root,
-        "--cause", cause,
+        "--cause", (cause if mlflow_project_detected else ""),
+        "--out", train_json,
     ])
 
+    with open(train_json, "r", encoding="utf-8") as f:
+        tr = json.load(f)
 
-    with open(detect_json, "r", encoding="utf-8") as f:
-        det = json.load(f)
+    run_id = (tr.get("run_id") or "").strip()
+    is_trained = "Yes" if run_id else "No"
 
-    # 1.5) Training detection (Phase 2.3) — uniquely identify current MLflow run
-    sh(["python", ".github/scripts/extract_mlflow.py",
-        "--config", args.config,
-        "--sha", sha,
-        "--out", mlflow_json])
-
-    with open(mlflow_json, "r", encoding="utf-8") as f:
-        ml = json.load(f)
-
+    # Keep a small mlflow_json for summary compatibility (generate_summary_md.py expects it)
+    ml = {
+        "is_trained": is_trained,
+        "run_id": run_id,
+        "reason": tr.get("reason", ""),
+    }
+    with open(mlflow_json, "w", encoding="utf-8") as f:
+        json.dump(ml, f, indent=2)
     # 2) Prepare DevOps payload for summary (tested format)
     devops_payload = {
         "branch": branch,
@@ -109,14 +122,34 @@ def main():
         "workflow_status",
         "mlflow_project_detected",
         "is_trained",
+        "mlflow_run_id",
+        "mlflow_params_kv",
+        "mlflow_metrics_kv",
         "cause",
         "changed_files_count",
         "script_path",
         "data_paths",
         "script_hit",
         "data_hit",
-        "mlflow_run_id",
     ]
+
+    # Phase 2.4: Extract metrics/params only when trained (key=value strings)
+    params_kv = ""
+    metrics_kv = ""
+
+    if is_trained == "Yes":
+        sh([
+            "python", ".github/scripts/extract_mlflow_details.py",
+            "--config", args.config,
+            "--run-id", run_id,
+            "--out", ml_details_json,
+        ])
+        with open(ml_details_json, "r", encoding="utf-8") as f:
+            md = json.load(f)
+
+        params_kv = (md.get("params_kv") or "").strip()
+        metrics_kv = (md.get("metrics_kv") or "").strip()
+
 
     row = {
         "timestamp_toronto": now,
@@ -125,11 +158,13 @@ def main():
         "commit_sha": sha,
         "commit_message": commit_msg,
         "workflow_status": status,
-        "mlflow_project_detected": "Yes" if det.get("mlflow_project_detected") else "No",
-        "is_trained": ml.get("is_trained", "No"),  # Phase 2.3 will update
-        "cause": det.get("cause", ""),
+        "mlflow_project_detected": "Yes" if mlflow_project_detected else "No",
+        "is_trained": is_trained,
+        "mlflow_run_id": run_id,
+        "mlflow_params_kv": params_kv,
+        "mlflow_metrics_kv": metrics_kv,
+        "cause": cause,
         **(det.get("dbg", {}) or {}),
-        "mlflow_run_id": ml.get("run_id", ""),
     }
 
     with open(row_json, "w", encoding="utf-8") as f:
