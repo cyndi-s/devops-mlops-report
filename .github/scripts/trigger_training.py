@@ -6,6 +6,25 @@ from typing import Any, Dict
 
 import yaml
 
+def ensure_repo_name_symlink(caller_root: str) -> str:
+    """
+    Some MLproject templates use paths like ../<repo_name>/src/train.py.
+    In our reusable workflow, caller is checked out to <workspace>/caller.
+    Create <workspace>/<repo_name> -> <workspace>/caller symlink so those paths resolve.
+    Returns a compat root path to use as the MLflow project URI.
+    """
+    repo_full = os.environ.get("GITHUB_REPOSITORY", "")
+    repo_name = repo_full.split("/")[-1] if repo_full else "repo"
+
+    workspace = os.path.dirname(os.path.abspath(caller_root))  # parent of .../caller
+    compat_root = os.path.join(workspace, repo_name)
+
+    if not os.path.exists(compat_root):
+        try:
+            os.symlink(os.path.abspath(caller_root), compat_root)
+        except FileExistsError:
+            pass
+    return compat_root
 
 def load_cfg(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -49,13 +68,16 @@ def main() -> int:
 
         # Trigger MLflow Project entry point in caller repo.
         # This honors MLproject + conda_env if your runner supports conda env manager.
+        compat_root = ensure_repo_name_symlink(caller_root)
+
         submitted = mlflow.projects.run(
-            uri=caller_root,
+            uri=compat_root,   # IMPORTANT: run from <workspace>/<repo_name>
             entry_point="main",
-            parameters={},            # keep defaults from MLproject
-            env_manager="local",      # uses local python env; if you rely on conda_env, switch to "conda"
+            parameters={},
+            env_manager="local",   # keep as you have it for now
             synchronous=True,
         )
+
 
         run_id = getattr(submitted, "run_id", "") or ""
         payload["run_id"] = run_id
