@@ -61,6 +61,15 @@ def main():
         "--caller-root", caller_root,
         "--sha", sha,
         "--out", detect_json])
+    
+    # Trigger training (Phase 2.3 prerequisite)
+    sh([
+        "python", ".github/scripts/trigger_training.py",
+        "--config", args.config,
+        "--caller-root", caller_root,
+        "--cause", cause,
+    ])
+
 
     with open(detect_json, "r", encoding="utf-8") as f:
         det = json.load(f)
