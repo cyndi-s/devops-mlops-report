@@ -84,10 +84,12 @@ def main() -> int:
             )
             run_id = getattr(submitted, "run_id", "") or ""
             payload["run_id"] = run_id
-            payload["reason"] = "training triggered and run_id captured" if run_id else \
-                "training finished but run_id not returned by MLflow Projects"
+            payload["reason"] = (
+                "training triggered and run_id captured"
+                if run_id
+                else "training finished but run_id not returned by MLflow Projects"
+            )
         except Exception as e:
-            payload["should_train"] = True
             payload["run_id"] = ""
             payload["reason"] = f"training failed: {type(e).__name__}: {e}"
 
