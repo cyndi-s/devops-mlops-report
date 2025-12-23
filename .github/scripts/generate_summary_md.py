@@ -78,10 +78,11 @@ def main():
         commit_msg = dev.get("commit_msg", "")
         commit_url = dev.get("commit_url", "")
 
-        if commit_url and commit_sha:
-            f.write(f"- Commit: [{commit_sha[:7]}]({commit_url}) — {commit_msg}\n")
+        short_sha = commit_sha[:7] if commit_sha else ""
+        if commit_url and short_sha:
+            f.write(f"- Commit: [{short_sha} — {commit_msg}]({commit_url})\n")
         else:
-            f.write(f"- Commit: {commit_sha[:7]} — {commit_msg}\n")
+            f.write(f"- Commit: {short_sha} — {commit_msg}\n")
 
         f.write(f"- Model source in APK: {dev.get('model_source_in_apk', 'Unknown (not implemented yet)')}\n")
         f.write(f"- Status: {dev.get('status', '')}\n")
@@ -93,7 +94,7 @@ def main():
 
         # Section 5
         f.write("## Section 5 — Commit History\n\n")
-        f.write(f"- **Commit History:** [commitHistory.csv]({args.gist_url})\n\n")
+        f.write(f"- **Commit History:** [commitHistory.csv]({args.gist_url})\n")
 
 
 if __name__ == "__main__":
