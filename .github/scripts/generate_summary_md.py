@@ -2,6 +2,17 @@ import argparse
 import json
 import os
 
+SUMMARY = os.getenv("GITHUB_STEP_SUMMARY", "/dev/stdout")
+REPO = os.getenv("GITHUB_REPOSITORY", "")
+SHA = os.getenv("GITHUB_SHA", "")
+BRANCH_ENV = os.getenv("GITHUB_REF_NAME", "")
+ACTOR_ENV = os.getenv("GITHUB_ACTOR", "")
+CSV_URL = os.getenv("COMMIT_CSV_RAW_URL", "")
+
+# Not always present; keep as optional fallback
+COMMIT_MSG_ENV = os.getenv("GITHUB_EVENT_HEAD_COMMIT_MESSAGE", "")
+
+commit_url_env = f"https://github.com/{REPO}/commit/{SHA}" if (REPO and SHA) else ""
 
 FIXED_MLFLOW_MISSING_MSG_MD = """
 **MLflow project not detected**
@@ -25,7 +36,7 @@ def main():
     ap.add_argument("--devops-json", required=True)
     args = ap.parse_args()
 
-    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    summary_path = SUMMARY
     if not summary_path:
         return
 
@@ -71,25 +82,25 @@ def main():
 
         # Section 3
         f.write("## Section 3 — Code\n\n")
-        f.write(f"- Branch: `{dev.get('branch', '')}`\n")
-        author = dev.get("author", "")
-        repo = os.environ.get("GITHUB_REPOSITORY", "")
-        server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
 
-        if author:
-            f.write(f"- Author: [{author}]({server}/{author})\n")
+        branch = (BRANCH_ENV or dev.get("branch", "") or "").strip()
+        author = (ACTOR_ENV or dev.get("author", "") or "").strip()
+
+        commit_sha = (SHA or dev.get("commit_sha", "") or "").strip()
+        commit_url = (commit_url_env or dev.get("commit_url", "") or "").strip()
+
+        commit_msg = (dev.get("commit_msg", "") or "").strip()
+        if not commit_msg:
+            commit_msg = (COMMIT_MSG_ENV or "").strip()
+
+        f.write(f"- Branch: `{branch}`\n")
+        f.write(f"- Author: `{author}`\n")
+
+        if commit_url and commit_sha:
+            # clickable short SHA + message together
+            f.write(f"- Commit: [{commit_sha[:7]} — {commit_msg}]({commit_url})\n")
         else:
-            f.write("- Author: \n")
-
-        commit_sha = dev.get("commit_sha", "")
-        commit_msg = dev.get("commit_msg", "")
-        commit_url = dev.get("commit_url", "")
-
-        short_sha = commit_sha[:7] if commit_sha else ""
-        if commit_url and short_sha:
-            f.write(f"- Commit: [{short_sha} — {commit_msg}]({commit_url})\n")
-        else:
-            f.write(f"- Commit: {short_sha} — {commit_msg}\n")
+            f.write(f"- Commit: {commit_sha[:7]} — {commit_msg}\n")
 
         f.write(f"- Model source in APK: {dev.get('model_source_in_apk', 'Unknown (not implemented yet)')}\n")
         f.write(f"- Status: {dev.get('status', '')}\n")
@@ -101,10 +112,14 @@ def main():
 
         # Section 5
         f.write("## Section 5 — Commit History\n\n")
-        gist_url = args.gist_url.rstrip("/")
-        f.write(
-            f"- **Commit History:** "
-            f"[commitHistory.csv]({gist_url}#file-commithistory-csv)\n"
-        )
+        if CSV_URL:
+            f.write(f"- **Commit History:** [commitHistory.csv]({CSV_URL})\n")
+        else:
+            gist_url = (args.gist_url or "").strip().strip('"').strip("'").rstrip("/")
+            gist_id = gist_url.split("/")[-1] if gist_url else ""
+            if gist_id:
+                f.write(f"- **Commit History:** [commitHistory.csv](https://gist.github.com/{gist_id})\n")
+            else:
+                f.write("- **Commit History:** commitHistory.csv\n")
 if __name__ == "__main__":
     main()
