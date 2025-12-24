@@ -193,7 +193,7 @@ def main():
         "--row-json", row_json])
 
    # 4) Render trend SVG (CSV -> SVG -> gist)
-    sh(["python", ".github/scripts/render_val_accuracy_svg.py",
+    sh(["python", ".github/scripts/render_svg.py",
         "--config", args.config,
         "--gist-url", gist_url,
         "--out", svg_json])
