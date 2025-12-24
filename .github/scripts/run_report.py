@@ -36,12 +36,13 @@ def main():
 
     # Context
     caller_root = os.path.abspath(os.path.join(os.getcwd(), args.caller_root))
-    sha = os.environ.get("GITHUB_SHA", "")
-    branch = os.environ.get("GITHUB_REF_NAME", "")
-    actor = os.environ.get("GITHUB_ACTOR", "")
+    sha    = os.environ.get("CALLER_SHA", "") or os.environ.get("GITHUB_SHA", "")
+    branch = os.environ.get("CALLER_REF_NAME", "") or os.environ.get("GITHUB_REF_NAME", "")
+    actor  = os.environ.get("CALLER_ACTOR", "") or os.environ.get("GITHUB_ACTOR", "")
 
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    repo = os.environ.get("CALLER_REPO", "") or os.environ.get("GITHUB_REPOSITORY", "")
+    server_url = os.environ.get("CALLER_SERVER_URL", "") or os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+
     commit_url = f"{server_url}/{repo}/commit/{sha}" if repo and sha else ""
     commit_msg = git_log_subject(caller_root, sha)
 
