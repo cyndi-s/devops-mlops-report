@@ -57,6 +57,8 @@ def main():
     row_json = os.path.join(workdir, "row.json")
     train_json = os.path.join(workdir, "train.json")
     ml_details_json = os.path.join(workdir, "ml_details.json")
+    svg_json = os.path.join(workdir, "svg.json")
+    model_json = os.path.join(workdir, "model.json")
 
     # 1) Detect MLflow project + cause attribution (tested)
     sh([
@@ -174,10 +176,28 @@ def main():
         "--gist-url", gist_url,
         "--row-json", row_json])
 
-    # 4) Summary markdown (tested layout)
+   # 4) Render trend SVG (CSV -> SVG -> gist)
+    sh(["python", ".github/scripts/render_val_accuracy_svg.py",
+        "--config", args.config,
+        "--gist-url", gist_url,
+        "--out", svg_json])
+
+    # 5) Fetch registry model version (best-effort)
+    sh(["python", ".github/scripts/fetch_registry_model.py",
+        "--config", args.config,
+        "--gist-url", gist_url,
+        "--out", model_json])
+
+    # 6) Summary markdown (CSV-only for Sections 1 & 2)
     sh(["python", ".github/scripts/generate_summary_md.py",
         "--config", args.config,
-        "--gist-url", gist_url])
+        "--gist-url", gist_url,
+        "--svg-json", svg_json,
+        "--model-json", model_json])
+
+    # 7) Optional prune (fixed policy: private -> max 90)
+    sh(["python", ".github/scripts/prune_mlflow_runs.py",
+        "--config", args.config])
 
 
 if __name__ == "__main__":
