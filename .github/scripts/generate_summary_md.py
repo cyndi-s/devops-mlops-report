@@ -9,10 +9,22 @@ from datetime import datetime, timezone
 from io import StringIO
 from typing import Any, Dict, List, Optional
 from urllib import request, error
+from zoneinfo import ZoneInfo
 
 import yaml
 
 CSV_NAME_DEFAULT = "commitHistory.csv"
+
+def get_tz(cfg: dict):
+    name = str(cfg.get("timezone") or "").strip()
+    if not name:
+        return None, ""
+    if name.upper() == "UTC":
+        name = "UTC"
+    try:
+        return ZoneInfo(name), ""
+    except Exception:
+        return None, f"Invalid timezone '{name}'. Falling back to runner timezone."
 
 
 def load_cfg(path: str) -> dict:
@@ -122,6 +134,7 @@ def main() -> int:
     ap.add_argument("--csv-name", default=CSV_NAME_DEFAULT)
     ap.add_argument("--svg-json", required=True)
     ap.add_argument("--model-json", required=True)
+    ap.add_argument("--devops-json", required=True)
     args = ap.parse_args()
 
     token = (os.environ.get("GIST_TOKEN") or "").strip()
@@ -129,6 +142,7 @@ def main() -> int:
         raise SystemExit("Missing env GIST_TOKEN")
 
     cfg = load_cfg(args.config)
+    tz, tz_warn = get_tz(cfg)
     report = cfg.get("report") or {}
     metric = str(report.get("highlight_metric") or "").strip()
     sharp_delta = float(report.get("sharp_delta") or 0.15)
@@ -158,7 +172,7 @@ def main() -> int:
     if not trained_this_run and sha:
         for r in reversed(rows):
             if (r.get("commit_sha") or "").strip() == sha:
-                trained_this_run = is_true(r.get("is_trained", "")) and bool((r.get("mlflow_run_id") or "").strip())
+                trained_this_run = is_true(r.get("is_trained", ""))
                 break
 
     # ---- SVG/model json ----
@@ -169,6 +183,10 @@ def main() -> int:
     with open(args.model_json, "r", encoding="utf-8") as f:
         mj = json.load(f) or {}
     model_version = (mj.get("model_version") or "").strip()
+
+    with open(args.devops_json, "r", encoding="utf-8") as f:
+        dev = json.load(f) or {}
+
 
     # ---- helpers ----
     def metric_from_row(r: Dict[str, str], key: str) -> Optional[float]:
@@ -232,20 +250,14 @@ def main() -> int:
             return f'<a href="{html.escape(url)}"><code>{html.escape(short)}</code></a>'
         return f"<code>{html.escape(short)}</code>"
 
-    # ---- Section 3 (restore your 6 items) ----
-    branch = (os.environ.get("GITHUB_REF_NAME") or "").strip()
-    actor = (os.environ.get("GITHUB_ACTOR") or "").strip()
-    commit_msg = (os.environ.get("GITHUB_EVENT_HEAD_COMMIT_MESSAGE") or "").strip()
-    if not commit_msg:
-        commit_msg = sh(["git", "log", "-1", "--pretty=%s"]) or ""
-    job_end = os.environ.get("JOB_END") or ""  # epoch seconds (your Phase2.4 style)
-    job_end_txt = ""
-    try:
-        if job_end:
-            dt = datetime.fromtimestamp(int(job_end), tz=timezone.utc).astimezone()
-            job_end_txt = dt.strftime("%Y-%m-%d %H:%M:%S %Z")
-    except Exception:
-        job_end_txt = ""
+    # ---- Section 3 (use caller devops_json to avoid callee mixups) ----
+    branch = (dev.get("branch") or "").strip()
+    actor = (dev.get("author") or "").strip()
+    sha = (dev.get("commit_sha") or "").strip()
+    commit_msg = (dev.get("commit_msg") or "").strip()
+    commit_url = (dev.get("commit_url") or "").strip()
+    finished_at = (dev.get("finished_at") or "").strip()
+
 
     model_source = "Trained in this run" if trained_this_run else "From previous run"
 
@@ -345,8 +357,9 @@ def main() -> int:
         md.append(f'- **Commit:** <a href="{html.escape(commit_url)}"><code>{html.escape(sha[:7])}</code> — {html.escape(commit_msg)}</a>\n')
     md.append(f"- **Model source:** {html.escape(model_source)}\n")
     md.append("- **Status:** Success\n")
-    if job_end_txt:
-        md.append(f"- **Job finished at:** {html.escape(job_end_txt)}\n")
+    if finished_at:
+        md.append(f"- **Job finished at:** {html.escape(finished_at)}\n")
+
 
     md.append("\n## 4) Artifacts\n\nPlaceholder (Phase 2.6)\n\n")
     md.append("## 5) Commit History\n\n")
