@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import time
 from io import StringIO
 from typing import Any, Dict, List, Optional
 from urllib import request, error
@@ -220,7 +221,24 @@ def main() -> int:
     svg_name = f"trend_{metric}.svg"
     svg = build_svg(timestamps, vals, sharp_flags, metric, sharp_delta)
 
-    update_gist_file(gist_id, token, svg_name, svg)
+    last_err = None
+    for attempt in range(6):  # ~1+2+4+8+16 sec total wait
+        try:
+            update_gist_file(gist_id, token, svg_name, svg)
+            last_err = None
+            break
+        except RuntimeError as e:
+            last_err = e
+            msg = str(e)
+            # GitHub sometimes returns 409 right after another PATCH to the same gist
+            if " 409 " in msg or "409 Conflict" in msg:
+                time.sleep(2 ** attempt)
+                continue
+            raise
+
+    if last_err is not None:
+        raise last_err
+
     raw_url = get_gist_raw_url(gist_id, token, svg_name)
     run_id = (os.environ.get("GITHUB_RUN_ID") or "").strip()
     svg_url = f"{raw_url}?ts={run_id}" if (raw_url and run_id) else raw_url
