@@ -176,10 +176,8 @@ def main():
 
     # 4) Summary markdown (tested layout)
     sh(["python", ".github/scripts/generate_summary_md.py",
-        "--gist-url", gist_url,
-        "--detect-json", detect_json,
-        "--mlflow-json", mlflow_json,
-        "--devops-json", devops_json])
+        "--config", args.config,
+        "--gist-url", gist_url])
 
 
 if __name__ == "__main__":
