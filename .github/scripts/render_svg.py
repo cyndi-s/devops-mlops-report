@@ -1,15 +1,18 @@
 import argparse
 import csv
 import json
-import math
 import os
 import re
 import time
+from datetime import datetime
 from io import StringIO
 from typing import Any, Dict, List, Optional
 from urllib import request, error
 
 import yaml
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 
 CSV_NAME_DEFAULT = "commitHistory.csv"
@@ -106,64 +109,63 @@ def moving_average(vals: List[float], k: int = 3) -> List[Optional[float]]:
 
 
 def build_svg(timestamps: List[str], vals: List[float], sharp_flags: List[bool], metric: str, sharp_delta: float) -> str:
-    width, height, pad = 980, 360, 44
+    # Matplotlib SVG to match POC-Mobile style (grid, axes, rotated ticks, legend)
     if not vals:
         return "<svg xmlns='http://www.w3.org/2000/svg'></svg>"
 
-    vmin, vmax = min(vals), max(vals)
-    if math.isclose(vmin, vmax):
-        vmax = vmin + 1e-9
+    # Parse timestamps (commitHistory uses "%Y-%m-%d %H:%M:%S")
+    xs: List[datetime] = []
+    for t in timestamps:
+        try:
+            xs.append(datetime.strptime((t or "").strip(), "%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            # fallback: keep ordering using "now" if parse fails
+            xs.append(datetime.now())
 
-    def sx(i: int) -> float:
-        if len(vals) == 1:
-            return pad + (width - 2 * pad) / 2
-        return pad + (width - 2 * pad) * (i / (len(vals) - 1))
+    fig, ax = plt.subplots(figsize=(12, 4.8), dpi=120)
 
-    def sy(v: float) -> float:
-        return pad + (height - 2 * pad) * (1 - (v - vmin) / (vmax - vmin))
+    # main line
+    ax.plot(xs, vals, marker="o", label=metric)
 
+    # sharp change points
+    sharp_x = [xs[i] for i, f in enumerate(sharp_flags) if f]
+    sharp_y = [vals[i] for i, f in enumerate(sharp_flags) if f]
+    if sharp_x:
+        ax.scatter(sharp_x, sharp_y, label=f"sharp change (≥ {sharp_delta})", zorder=5)
+
+    # median line
     med = median(vals)
-    med_y = sy(med)
+    ax.axhline(med, linestyle="--", label=f"Median Performance ({med:.3f})")
+
+    # 3-run moving average
     ma = moving_average(vals, 3)
+    ma_x = [xs[i] for i, v in enumerate(ma) if v is not None]
+    ma_y = [v for v in ma if v is not None]
+    if ma_x:
+        ax.plot(ma_x, ma_y, label="3-run MA", linewidth=2, alpha=0.7)
 
-    main_poly = " ".join([f"{sx(i):.1f},{sy(vals[i]):.1f}" for i in range(len(vals))])
-    ma_pts = []
-    for i, mv in enumerate(ma):
-        if mv is None:
-            continue
-        ma_pts.append(f"{sx(i):.1f},{sy(mv):.1f}")
-    ma_poly = " ".join(ma_pts)
+    ax.set_title(f"Model Performance ({metric})")
+    ax.set_ylabel(f"Performance ({metric})")
 
-    # x labels: every 2 points + last
-    labels = []
-    for i, t in enumerate(timestamps):
-        if i % 2 == 0 or i == len(timestamps) - 1:
-            labels.append((sx(i), height - 12, (t or "")[5:16]))
+    # grid like your example
+    ax.grid(True, linestyle="--", alpha=0.4)
 
-    out: List[str] = []
-    out.append(f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>")
-    out.append("<rect x='0' y='0' width='100%' height='100%' fill='white'/>")
-    out.append(f"<line x1='{pad}' y1='{pad}' x2='{pad}' y2='{height-pad}' stroke='#000' stroke-width='1'/>")
-    out.append(f"<line x1='{pad}' y1='{height-pad}' x2='{width-pad}' y2='{height-pad}' stroke='#000' stroke-width='1'/>")
-    out.append(f"<line x1='{pad}' y1='{med_y:.1f}' x2='{width-pad}' y2='{med_y:.1f}' stroke='red' stroke-dasharray='6,4' stroke-width='2'/>")
-    if ma_poly:
-        out.append(f"<polyline points='{ma_poly}' fill='none' stroke='#f4a261' stroke-width='2' opacity='0.9'/>")
-    out.append(f"<polyline points='{main_poly}' fill='none' stroke='#1f77b4' stroke-width='3'/>")
+    # nicer datetime ticks + rotation like POC-Mobile
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+    for label in ax.get_xticklabels():
+        label.set_rotation(45)
+        label.set_ha("right")
 
-    for i, v in enumerate(vals):
-        x, y = sx(i), sy(v)
-        out.append(f"<circle cx='{x:.1f}' cy='{y:.1f}' r='4' fill='#1f77b4'/>")
-        if sharp_flags[i]:
-            out.append(f"<circle cx='{x:.1f}' cy='{y:.1f}' r='6' fill='red' opacity='0.9'/>")
-        out.append(f"<text x='{x:.1f}' y='{(y-10):.1f}' font-size='12' text-anchor='middle'>{v:.3f}</text>")
+    ax.legend(loc="best")
+    fig.tight_layout()
 
-    for x, y, t in labels:
-        out.append(f"<text x='{x:.1f}' y='{y:.1f}' font-size='11' text-anchor='middle'>{t}</text>")
+    # return SVG string
+    from io import StringIO as _StringIO
+    buf = _StringIO()
+    fig.savefig(buf, format="svg")
+    plt.close(fig)
+    return buf.getvalue()
 
-    out.append(f"<text x='{width/2:.1f}' y='20' font-size='16' text-anchor='middle'>Model Performance ({metric})</text>")
-    out.append(f"<text x='{pad}' y='{pad-10}' font-size='12'>red dot: abs(Δ) ≥ {sharp_delta:.2f}</text>")
-    out.append("</svg>")
-    return "\n".join(out)
 
 
 def main() -> int:
@@ -197,8 +199,23 @@ def main() -> int:
 
     rows.sort(key=lambda r: r.get("timestamp_toronto", ""))
 
-    trained = [r for r in rows if is_true(r.get("is_trained", ""))]
+    trained_all = [r for r in rows if is_true(r.get("is_trained", ""))]
+
+    # DEDUPE by commit_sha: keep latest row per commit
+    seen = set()
+    trained = []
+    for r in reversed(trained_all):
+        sha = (r.get("commit_sha") or "").strip()
+        if sha and sha in seen:
+            continue
+        if sha:
+            seen.add(sha)
+        trained.append(r)
+    trained.reverse()
+
+    # apply window AFTER dedupe
     trained = trained[-window:]
+
 
     timestamps: List[str] = []
     vals: List[float] = []
