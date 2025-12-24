@@ -8,6 +8,17 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
+def get_tz(cfg: dict) -> ZoneInfo | None:
+    name = str(cfg.get("timezone") or "").strip()
+    if not name:
+        return None
+    if name.upper() == "UTC":
+        name = "UTC"
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return None
+
 
 def sh(cmd: list[str]) -> None:
     subprocess.check_call(cmd)
@@ -47,7 +58,8 @@ def main():
     commit_msg = git_log_subject(caller_root, sha)
 
     status = os.environ.get("WORKFLOW_STATUS", "success")
-    now_dt = dt.datetime.now(ZoneInfo("America/Toronto"))
+    tz = get_tz(cfg)
+    now_dt = dt.datetime.now(tz) if tz else dt.datetime.now().astimezone()
     finished_at = now_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
 
     # for Section 3 (POC-Mobile style)
@@ -98,18 +110,18 @@ def main():
         tr = json.load(f)
 
     run_id = (tr.get("run_id") or "").strip()
-    is_trained = "true" if run_id else "false"
+    trained = bool(tr.get("trained"))  # NEW
+    is_trained = "true" if trained else "false"
 
-    # Ground truth: if we have a run_id, training happened in THIS workflow run
-    os.environ["TRAINED_THIS_RUN"] = "true" if run_id else "false"
-
+    # Ground truth: training happened in THIS workflow run (even if run_id missing)
+    os.environ["TRAINED_THIS_RUN"] = "true" if trained else "false"
 
     # Keep a small mlflow_json for summary compatibility (generate_summary_md.py expects it)
     ml = {
         "is_trained": is_trained,
         "run_id": run_id,
         "reason": tr.get("reason", ""),
-        "duration_min": train_duration_min if run_id else "",
+        "duration_min": train_duration_min if trained else "",
     }
     with open(mlflow_json, "w", encoding="utf-8") as f:
         json.dump(ml, f, indent=2)
@@ -128,7 +140,7 @@ def main():
         json.dump(devops_payload, f, indent=2)
 
     # 3) Phase 2.2 row -> commitHistory.csv (tested gist append)
-    now = dt.datetime.now(ZoneInfo("America/Toronto")).strftime("%Y-%m-%d %H:%M:%S")
+    now = (dt.datetime.now(tz) if tz else dt.datetime.now().astimezone()).strftime("%Y-%m-%d %H:%M:%S")
 
     fieldnames = [
         "timestamp_toronto",
@@ -155,7 +167,7 @@ def main():
     params_kv = ""
     metrics_kv = ""
 
-    if is_trained == "true":
+    if is_trained == "true" and run_id:
         sh([
             "python", ".github/scripts/extract_mlflow_details.py",
             "--config", args.config,
@@ -179,7 +191,7 @@ def main():
         "mlflow_project_detected": "Yes" if mlflow_project_detected else "No",
         "is_trained": is_trained,
         "mlflow_run_id": run_id,
-        "duration_min": (str(train_duration_min) if run_id else ""),
+        "duration_min": (str(train_duration_min) if trained else ""),
         "mlflow_params_kv": params_kv,
         "mlflow_metrics_kv": metrics_kv,
         "cause": cause,
@@ -210,7 +222,8 @@ def main():
         "--config", args.config,
         "--gist-url", gist_url,
         "--svg-json", svg_json,
-        "--model-json", model_json])
+        "--model-json", model_json,
+        "--devops-json", devops_json])
 
     # 7) Optional prune (fixed policy: private -> max 90)
     repo_visibility = str(cfg.get("repo_visibility") or "").strip().lower()
