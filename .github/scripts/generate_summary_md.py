@@ -4,12 +4,13 @@ import html
 import json
 import os
 import re
+import subprocess
+from datetime import datetime, timezone
 from io import StringIO
 from typing import Any, Dict, List, Optional
 from urllib import request, error
 
 import yaml
-
 
 CSV_NAME_DEFAULT = "commitHistory.csv"
 
@@ -36,7 +37,6 @@ def gh_api_request(method: str, url: str, token: str, payload: dict | None = Non
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
-
     req = request.Request(url, data=data, headers=headers, method=method)
     try:
         with request.urlopen(req) as resp:
@@ -55,22 +55,20 @@ def get_gist_file_content(gist_id: str, token: str, filename: str) -> str | None
     return files[filename].get("content")
 
 
-def parse_kv_string(s: str) -> Dict[str, str]:
+def is_true(v: str) -> bool:
+    return (v or "").strip().lower() in ("yes", "true", "1")
+
+
+def parse_kv(s: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
     s = (s or "").strip()
     if not s:
         return out
-    parts = [p.strip() for p in s.split(";") if p.strip()]
-    for p in parts:
-        if "=" not in p:
-            continue
-        k, v = p.split("=", 1)
-        out[k.strip()] = v.strip()
+    for p in [x.strip() for x in s.split(";") if x.strip()]:
+        if "=" in p:
+            k, v = p.split("=", 1)
+            out[k.strip()] = v.strip()
     return out
-
-
-def is_true(v: str) -> bool:
-    return (v or "").strip().lower() in ("yes", "true", "1")
 
 
 def safe_float(x: Any) -> Optional[float]:
@@ -102,11 +100,18 @@ def arrow_delta(prev: Any, cur: Any) -> str:
     return f"{arrow} {mag_s}"
 
 
+def sh(args: List[str]) -> str:
+    try:
+        return subprocess.check_output(args, text=True).strip()
+    except Exception:
+        return ""
+
+
 def write_summary(md: str) -> None:
-    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not summary_path:
+    out = os.environ.get("GITHUB_STEP_SUMMARY") or ""
+    if not out:
         return
-    with open(summary_path, "a", encoding="utf-8") as f:
+    with open(out, "a", encoding="utf-8") as f:
         f.write(md)
 
 
@@ -124,35 +129,39 @@ def main() -> int:
         raise SystemExit("Missing env GIST_TOKEN")
 
     cfg = load_cfg(args.config)
-    report_cfg = (cfg.get("report") or {})
-    metric_key = str(report_cfg.get("highlight_metric") or "val_accuracy").strip()
-    sharp_delta = float(report_cfg.get("sharp_delta") or 0.15)
-    trend_window = int(report_cfg.get("trend_window") or 10)
+    report = cfg.get("report") or {}
+    metric = str(report.get("highlight_metric") or "").strip()
+    sharp_delta = float(report.get("sharp_delta") or 0.15)
+    window = int(report.get("trend_window") or 10)
+
+    if not metric:
+        raise SystemExit("Missing report.highlight_metric in config")
 
     gist_id = extract_gist_id(args.gist_url)
     csv_text = get_gist_file_content(gist_id, token, args.csv_name) or ""
-
     rows: List[Dict[str, str]] = []
     if csv_text.strip():
         rdr = csv.DictReader(StringIO(csv_text))
         for r in rdr:
-            rows.append({k: (v or "").strip() for k, v in r.items()})
+            rows.append({k: (v or "").strip() for k, v in (r or {}).items()})
 
     rows.sort(key=lambda r: r.get("timestamp_toronto", ""))
 
     trained_rows = [r for r in rows if is_true(r.get("is_trained", ""))]
-    latest_model = trained_rows[-1] if trained_rows else None
-    prev_model = trained_rows[-2] if len(trained_rows) >= 2 else None
+    latest = trained_rows[-1] if trained_rows else None
+    prev = trained_rows[-2] if len(trained_rows) >= 2 else None
 
-    # determine if THIS workflow trained (by matching commit sha to last row)
+    # ---- Ground truth: trained_this_run (Phase 2.4 rule) ----
+    # Prefer an explicit env flag if run_report.py sets it; fallback to CSV row with this commit and a non-empty run_id.
+    trained_this_run = (os.environ.get("TRAINED_THIS_RUN") or "").strip().lower() == "true"
     sha = (os.environ.get("GITHUB_SHA") or "").strip()
-    trained_this_run = False
-    for r in reversed(rows):
-        if (r.get("commit_sha") or "").strip() == sha:
-            trained_this_run = is_true(r.get("is_trained", ""))
-            break
+    if not trained_this_run and sha:
+        for r in reversed(rows):
+            if (r.get("commit_sha") or "").strip() == sha:
+                trained_this_run = is_true(r.get("is_trained", "")) and bool((r.get("mlflow_run_id") or "").strip())
+                break
 
-    # read svg + model json
+    # ---- SVG/model json ----
     with open(args.svg_json, "r", encoding="utf-8") as f:
         svgj = json.load(f) or {}
     svg_url = (svgj.get("svg_url") or "").strip()
@@ -161,69 +170,92 @@ def main() -> int:
         mj = json.load(f) or {}
     model_version = (mj.get("model_version") or "").strip()
 
-    # helpers to read metrics
+    # ---- helpers ----
     def metric_from_row(r: Dict[str, str], key: str) -> Optional[float]:
-        m = parse_kv_string(r.get("mlflow_metrics_kv", ""))
+        m = parse_kv(r.get("mlflow_metrics_kv", ""))
         return safe_float(m.get(key))
 
-    def params_str(r: Dict[str, str]) -> str:
-        return (r.get("mlflow_params_kv") or "").strip()
+    def duration_min(r: Dict[str, str]) -> Optional[float]:
+        # expect a dedicated column in CSV (recommended)
+        d = safe_float(r.get("duration_min"))
+        if d is not None:
+            return d
+        # fallback: if someone stored in metrics_kv as duration_min=...
+        m = parse_kv(r.get("mlflow_metrics_kv", ""))
+        return safe_float(m.get("duration_min"))
 
-    # Section 1 fields
-    status_text = "from this workflow run" if trained_this_run else "from a previous run"
-    badge = f"<strong><ins><code>{html.escape(status_text)}</code></ins></strong>"
+    # ---- Section 1 data ----
+    badge_txt = "from this workflow run" if trained_this_run else "from a previous run"
+    badge = f"<strong><ins><code>{html.escape(badge_txt)}</code></ins></strong>"
 
-    s1_ts = (latest_model.get("timestamp_toronto") if latest_model else "") or ""
-    s1_cause = (latest_model.get("cause") if latest_model else "") or ""
-    s1_params = params_str(latest_model) if latest_model else ""
+    s1_ts = (latest.get("timestamp_toronto") if latest else "") or ""
+    s1_cause = (latest.get("cause") if latest else "") or ""
+    s1_params = (latest.get("mlflow_params_kv") if latest else "") or ""
+    s1_metrics = (latest.get("mlflow_metrics_kv") if latest else "") or ""
+    s1_dur = duration_min(latest) if latest else None
 
-    s1_acc = metric_from_row(latest_model, "accuracy") if latest_model else None
-    s1_vacc = metric_from_row(latest_model, metric_key) if latest_model else None
-    s1_loss = metric_from_row(latest_model, "loss") if latest_model else None
-    s1_vloss = metric_from_row(latest_model, "val_loss") if latest_model else None
+    cur_h = metric_from_row(latest, metric) if latest else None
+    prev_h = metric_from_row(prev, metric) if prev else None
 
-    p_vacc = metric_from_row(prev_model, metric_key) if prev_model else None
-    p_vloss = metric_from_row(prev_model, "val_loss") if prev_model else None
+    mv_cell = model_version if model_version else "Not Registered"
 
-    # Section 2: last N trained rows, oldest->newest
-    trend_base = trained_rows[-trend_window:] if trained_rows else []
-    # build deltas sequentially using the selected metric
+    # ---- Section 2 points (last N trained) ----
+    base = trained_rows[-window:] if trained_rows else []
     pts = []
-    prev_v: Optional[float] = None
-    for r in trend_base:
-        v = metric_from_row(r, metric_key)
+    prev_val: Optional[float] = None
+    for r in base:
+        v = metric_from_row(r, metric)
         if v is None:
             continue
-        d = 0.0 if prev_v is None else (v - prev_v)
-        sharp = (abs(d) >= sharp_delta) if prev_v is not None else False
-        prev_v = v
+        d = 0.0 if prev_val is None else (v - prev_val)
+        sharp = (abs(d) >= sharp_delta) if prev_val is not None else False
+        prev_val = v
         pts.append({
-            "ts": (r.get("timestamp_toronto") or ""),
-            "branch": (r.get("branch") or ""),
-            "author": (r.get("author") or ""),
-            "cause": (r.get("cause") or "None"),
+            "ts": r.get("timestamp_toronto", ""),
+            "branch": r.get("branch", ""),
+            "author": r.get("author", ""),
+            "cause": r.get("cause", "None") or "None",
             "val": v,
             "delta": d,
             "sharp": sharp,
-            "sha": (r.get("commit_sha") or ""),
+            "dur": duration_min(r),
+            "sha": r.get("commit_sha", ""),
         })
 
     repo = (os.environ.get("GITHUB_REPOSITORY") or "").strip()
     server = (os.environ.get("GITHUB_SERVER_URL") or "https://github.com").strip()
 
-    def commit_cell(sha_full: str) -> str:
+    def commit_link(sha_full: str) -> str:
         short = (sha_full or "")[:7]
         if repo and sha_full:
             url = f"{server}/{repo}/commit/{sha_full}"
             return f'<a href="{html.escape(url)}"><code>{html.escape(short)}</code></a>'
         return f"<code>{html.escape(short)}</code>"
 
+    # ---- Section 3 (restore your 6 items) ----
+    branch = (os.environ.get("GITHUB_REF_NAME") or "").strip()
+    actor = (os.environ.get("GITHUB_ACTOR") or "").strip()
+    commit_msg = (os.environ.get("GITHUB_EVENT_HEAD_COMMIT_MESSAGE") or "").strip()
+    if not commit_msg:
+        commit_msg = sh(["git", "log", "-1", "--pretty=%s"]) or ""
+    job_end = os.environ.get("JOB_END") or ""  # epoch seconds (your Phase2.4 style)
+    job_end_txt = ""
+    try:
+        if job_end:
+            dt = datetime.fromtimestamp(int(job_end), tz=timezone.utc).astimezone()
+            job_end_txt = dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+    except Exception:
+        job_end_txt = ""
+
+    model_source = "Trained in this run" if trained_this_run else "From previous run"
+
+    # ---- Write summary ----
     md: List[str] = []
     md.append("# Pipeline Summary\n\n")
 
-    # ---- Section 1 ----
-    md.append(f"## 1) Model in APK: {badge}\n\n")
-    if not latest_model:
+    # Section 1
+    md.append(f"## 1) Latest Trained Model: {badge}\n\n")
+    if not latest:
         md.append("_No trained model found in commitHistory.csv yet._\n\n")
     else:
         md.append("<table style='width:100%; text-align:center;'>")
@@ -232,37 +264,30 @@ def main() -> int:
                   "<th>model_version</th>"
                   "<th>Cause</th>"
                   "<th>Parameters</th>"
-                  "<th>accuracy</th>"
-                  f"<th>{html.escape(metric_key)}</th>"
-                  f"<th>Δ{html.escape(metric_key)}</th>"
-                  "<th>loss</th>"
-                  "<th>val_loss</th>"
-                  "<th>Δval_loss</th>"
-                  "</tr></thead>")
-        md.append("<tbody><tr>")
+                  "<th>Metrics</th>"
+                  f"<th>Δ{html.escape(metric)}</th>"
+                  "<th>Duration<br>(min)</th>"
+                  "</tr></thead><tbody><tr>")
 
         cells = [
             html.escape(s1_ts),
-            html.escape(model_version or ""),
+            f"<code>{html.escape(mv_cell)}</code>",
             f"<code>{html.escape(s1_cause)}</code>",
             f"<code>{html.escape(s1_params)}</code>",
-            html.escape(fmt_val(s1_acc) if s1_acc is not None else ""),
-            html.escape(fmt_val(s1_vacc) if s1_vacc is not None else ""),
-            html.escape(arrow_delta(p_vacc, s1_vacc)),
-            html.escape(fmt_val(s1_loss) if s1_loss is not None else ""),
-            html.escape(fmt_val(s1_vloss) if s1_vloss is not None else ""),
-            html.escape(arrow_delta(p_vloss, s1_vloss)),
+            f"<code>{html.escape(s1_metrics)}</code>",
+            f"<code>{html.escape(arrow_delta(prev_h, cur_h))}</code>",
+            html.escape(fmt_val(s1_dur) if s1_dur is not None else ""),
         ]
         for c in cells:
             md.append(f"<td style='text-align:center; vertical-align:middle; word-break:break-word; max-width:100%'>{c}</td>")
         md.append("</tr></tbody></table>\n\n")
 
-    # ---- Section 2 ----
-    md.append(f"## 2) Model Performance ({html.escape(metric_key)})\n\n")
+    # Section 2
+    md.append(f"## 2) Model Performance ({html.escape(metric)})\n\n")
     if svg_url:
-        md.append(f"<img alt='{html.escape(metric_key)} trend' src='{html.escape(svg_url)}' style='width:100%; height:auto; display:block;'/>\n\n")
+        md.append(f"<img alt='{html.escape(metric)} trend' src='{html.escape(svg_url)}' style='width:100%; height:auto; display:block;'/>\n\n")
     else:
-        md.append("<em>SVG not available.</em>\n\n")
+        md.append("<em>SVG not available (no metric points found).</em>\n\n")
 
     md.append("<table style='width:100%; table-layout:auto; border-collapse:collapse;'>")
     md.append("<thead><tr>"
@@ -270,42 +295,60 @@ def main() -> int:
               "<th>Branch</th>"
               "<th>Author</th>"
               "<th>Cause</th>"
-              f"<th>{html.escape(metric_key)}</th>"
-              f"<th>Δ{html.escape(metric_key)}</th>"
+              f"<th>{html.escape(metric)}</th>"
+              f"<th>Δ{html.escape(metric)}</th>"
+              "<th>Duration<br>(min)</th>"
               "<th>Commit</th>"
               "</tr></thead><tbody>")
 
-    # Build table rows oldest -> newest; highlight sharp changes only
+    # Use computed per-step delta; highlight sharp rows only (>= sharp_delta)
     for i, p in enumerate(pts):
-        ts_cell = html.escape(p["ts"])
-        br = f"<code>{html.escape(p['branch'])}</code>"
-        au = f"<code>{html.escape(p['author'])}</code>"
-        cause = f"<code>{html.escape(p['cause'] or 'None')}</code>"
-
         val_txt = fmt_val(p["val"])
-        d_txt = "→ 0.000" if i == 0 else arrow_delta(p["val"] - p["delta"], p["val"])
-        val_cell = f"<strong><ins>{html.escape(val_txt)}</ins></strong>" if p["sharp"] else html.escape(val_txt)
+        # delta display: first point → 0
+        if i == 0:
+            d_txt = "→ 0.000"
+            is_sharp = False
+        else:
+            prev_val_for_display = p["val"] - p["delta"]
+            d_txt = arrow_delta(prev_val_for_display, p["val"])
+            is_sharp = bool(p["sharp"])
+
+        row_cells = [
+            html.escape(p["ts"]),
+            f"<code>{html.escape(p['branch'])}</code>",
+            f"<code>{html.escape(p['author'])}</code>",
+            f"<code>{html.escape(p['cause'])}</code>",
+            html.escape(val_txt),
+            html.escape(d_txt),
+            html.escape(fmt_val(p["dur"]) if p["dur"] is not None else ""),
+            commit_link(p["sha"]),
+        ]
+
+        if is_sharp:
+            row_cells = [f"<strong><ins>{c}</ins></strong>" for c in row_cells]
 
         md.append("<tr>")
-        for c in [ts_cell, br, au, cause, val_cell, html.escape(d_txt), commit_cell(p["sha"])]:
+        for c in row_cells:
             md.append(f"<td style='text-align:center; vertical-align:middle; word-break:break-word; max-width:100%'>{c}</td>")
         md.append("</tr>")
 
     md.append("</tbody></table>\n\n")
 
-    # ---- Section 3/4/5 (keep minimal for now) ----
+    # Section 3 (your 6 items)
     md.append("## 3) Code\n\n")
-    branch = (os.environ.get("GITHUB_REF_NAME") or "").strip()
-    actor = (os.environ.get("GITHUB_ACTOR") or "").strip()
-    md.append(f"- Branch: `{html.escape(branch)}`\n")
-    md.append(f"- Author: `{html.escape(actor)}`\n")
+    if branch:
+        md.append(f"- **Branch:** <code>{html.escape(branch)}</code>\n")
+    if actor:
+        md.append(f"- **Author:** <code>{html.escape(actor)}</code>\n")
     if sha and repo:
         commit_url = f"{server}/{repo}/commit/{sha}"
-        md.append(f"- Commit: [{html.escape(sha[:7])}]({html.escape(commit_url)})\n")
-    md.append("\n")
+        md.append(f'- **Commit:** <a href="{html.escape(commit_url)}"><code>{html.escape(sha[:7])}</code> — {html.escape(commit_msg)}</a>\n')
+    md.append(f"- **Model source:** {html.escape(model_source)}\n")
+    md.append("- **Status:** Success\n")
+    if job_end_txt:
+        md.append(f"- **Job finished at:** {html.escape(job_end_txt)}\n")
 
-    md.append("## 4) Artifacts\n\nPlaceholder (Phase 2.6)\n\n")
-
+    md.append("\n## 4) Artifacts\n\nPlaceholder (Phase 2.6)\n\n")
     md.append("## 5) Commit History\n\n")
     md.append(f"- **Commit History:** [commitHistory.csv](https://gist.github.com/{html.escape(gist_id)})\n\n")
 
