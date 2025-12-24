@@ -3,6 +3,7 @@ import datetime as dt
 import json
 import os
 import subprocess
+import time
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -45,7 +46,12 @@ def main():
     commit_msg = git_log_subject(caller_root, sha)
 
     status = os.environ.get("WORKFLOW_STATUS", "success")
-    finished_at = dt.datetime.now(ZoneInfo("America/Toronto")).strftime("%Y-%m-%d %H:%M:%S %Z")
+    now_dt = dt.datetime.now(ZoneInfo("America/Toronto"))
+    finished_at = now_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+    # for Section 3 (POC-Mobile style)
+    job_end_epoch = int(now_dt.timestamp())
+    os.environ["JOB_END"] = str(job_end_epoch)
 
     # Work dir for step-to-step files
     workdir = os.path.abspath(".github/scripts/.work")
@@ -76,6 +82,7 @@ def main():
     mlflow_project_detected = bool(det.get("mlflow_project_detected"))
 
     # 1.5) Trigger training (Phase 2.3) and capture run_id (NO commit-tag query)
+    t0 = time.time()
     sh([
         "python", ".github/scripts/trigger_training.py",
         "--config", args.config,
@@ -83,18 +90,25 @@ def main():
         "--cause", (cause if mlflow_project_detected else ""),
         "--out", train_json,
     ])
+    t1 = time.time()
+    train_duration_min = round((t1 - t0) / 60.0, 2)
 
     with open(train_json, "r", encoding="utf-8") as f:
         tr = json.load(f)
 
     run_id = (tr.get("run_id") or "").strip()
-    is_trained = "Yes" if run_id else "No"
+    is_trained = "true" if run_id else "false"
+
+    # Ground truth: if we have a run_id, training happened in THIS workflow run
+    os.environ["TRAINED_THIS_RUN"] = "true" if run_id else "false"
+
 
     # Keep a small mlflow_json for summary compatibility (generate_summary_md.py expects it)
     ml = {
         "is_trained": is_trained,
         "run_id": run_id,
         "reason": tr.get("reason", ""),
+        "duration_min": train_duration_min if run_id else "",
     }
     with open(mlflow_json, "w", encoding="utf-8") as f:
         json.dump(ml, f, indent=2)
@@ -125,6 +139,7 @@ def main():
         "mlflow_project_detected",
         "is_trained",
         "mlflow_run_id",
+        "duration_min",
         "mlflow_params_kv",
         "mlflow_metrics_kv",
         "cause",
@@ -139,7 +154,7 @@ def main():
     params_kv = ""
     metrics_kv = ""
 
-    if is_trained == "Yes":
+    if is_trained == "true":
         sh([
             "python", ".github/scripts/extract_mlflow_details.py",
             "--config", args.config,
@@ -163,6 +178,7 @@ def main():
         "mlflow_project_detected": "Yes" if mlflow_project_detected else "No",
         "is_trained": is_trained,
         "mlflow_run_id": run_id,
+        "duration_min": (str(train_duration_min) if run_id else ""),
         "mlflow_params_kv": params_kv,
         "mlflow_metrics_kv": metrics_kv,
         "cause": cause,
@@ -196,8 +212,10 @@ def main():
         "--model-json", model_json])
 
     # 7) Optional prune (fixed policy: private -> max 90)
-    sh(["python", ".github/scripts/prune_mlflow_runs.py",
-        "--config", args.config])
+    repo_visibility = str(cfg.get("repo_visibility") or "").strip().lower()
+    if repo_visibility == "private":
+        sh(["python", ".github/scripts/prune_mlflow_runs.py",
+            "--config", args.config])
 
 
 if __name__ == "__main__":
