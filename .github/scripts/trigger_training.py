@@ -59,6 +59,7 @@ def main() -> int:
     cause = (args.cause or "").strip()
     payload: Dict[str, Any] = {
         "should_train": False,
+        "trained": False,  
         "run_id": "",
         "reason": "",
     }
@@ -72,7 +73,7 @@ def main() -> int:
 
         # MLflow must be installed in the runner environment
         import mlflow  # type: ignore
-        
+
         cfg = load_cfg(args.config)
         tracking_uri = ((cfg.get("mlflow") or {}).get("tracking_uri") or "").strip()
         if tracking_uri:
@@ -87,16 +88,22 @@ def main() -> int:
                 env_manager="local",
                 synchronous=True,
             )
+
             run_id = getattr(submitted, "run_id", "") or ""
             payload["run_id"] = run_id
+
+            # NEW: training success even if run_id is missing
+            payload["trained"] = True
             payload["reason"] = (
                 "training triggered and run_id captured"
                 if run_id
                 else "training finished but run_id not returned by MLflow Projects"
             )
         except Exception as e:
+            payload["trained"] = False
             payload["run_id"] = ""
             payload["reason"] = f"training failed: {type(e).__name__}: {e}"
+
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
