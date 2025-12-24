@@ -161,7 +161,20 @@ def main() -> int:
 
     rows.sort(key=lambda r: r.get("timestamp_toronto", ""))
 
-    trained_rows = [r for r in rows if is_true(r.get("is_trained", ""))]
+    trained_rows_all = [r for r in rows if is_true(r.get("is_trained", ""))]
+
+    # DEDUPE by commit_sha: keep latest row per commit
+    seen = set()
+    trained_rows = []
+    for r in reversed(trained_rows_all):
+        sha_i = (r.get("commit_sha") or "").strip()
+        if sha_i and sha_i in seen:
+            continue
+        if sha_i:
+            seen.add(sha_i)
+        trained_rows.append(r)
+    trained_rows.reverse()
+    
     latest = trained_rows[-1] if trained_rows else None
     prev = trained_rows[-2] if len(trained_rows) >= 2 else None
 
