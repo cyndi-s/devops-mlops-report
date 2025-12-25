@@ -20,11 +20,14 @@ def run_git(cwd: str, args: list[str]) -> str:
 
 
 def get_changed_files_single_commit(repo_dir: str, sha: str) -> list[str]:
-    try:
-        txt = run_git(repo_dir, ["diff-tree", "--no-commit-id", "--name-only", "-r", sha])
-        return [f.strip() for f in txt.splitlines() if f.strip()]
-    except Exception:
+     if not sha:
         return []
+     try:
+         txt = run_git(repo_dir, ["show", "--name-only", "--pretty=format:", sha])
+         files = [f.strip() for f in txt.splitlines() if f.strip()]
+         return files
+     except Exception:
+         return []
 
 
 def parse_mlproject_for_script(mlproject_path: str) -> str | None:
