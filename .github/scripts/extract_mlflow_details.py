@@ -20,6 +20,15 @@ def kv_string(d: Dict[str, Any]) -> str:
         items.append(f"{k}={v}")
     return "; ".join(items)
 
+def format_duration_ms(ms: int | None) -> str:
+    if not ms or ms <= 0:
+        return ""
+    total_sec = int(ms // 1000)
+    if total_sec < 60:
+        return f"{total_sec}s"
+    m, s = divmod(total_sec, 60)
+    return f"{m}m {s}s"
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -43,6 +52,7 @@ def main() -> int:
         "metrics": {},
         "params_kv": "",
         "metrics_kv": "",
+        "duration": "",
         "reason": "",
     }
 
@@ -55,6 +65,13 @@ def main() -> int:
 
         client = MlflowClient()
         run = client.get_run(args.run_id)
+        info = run.info
+
+        duration_ms = None
+        if info.start_time and info.end_time:
+            duration_ms = info.end_time - info.start_time
+        duration_str = format_duration_ms(duration_ms)
+
 
         payload["experiment_id"] = run.info.experiment_id
         payload["params"] = dict(run.data.params or {})
@@ -62,6 +79,7 @@ def main() -> int:
 
         payload["params_kv"] = kv_string(payload["params"])
         payload["metrics_kv"] = kv_string(payload["metrics"])
+        payload["duration"] = duration_str 
         payload["reason"] = "ok"
 
     except Exception as e:
