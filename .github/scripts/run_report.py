@@ -103,8 +103,6 @@ def main():
         "--cause", (cause if mlflow_project_detected else ""),
         "--out", train_json,
     ])
-    t1 = time.time()
-    train_duration_min = round((t1 - t0) / 60.0, 2)
 
     with open(train_json, "r", encoding="utf-8") as f:
         tr = json.load(f)
@@ -152,7 +150,7 @@ def main():
         "mlflow_project_detected",
         "is_trained",
         "mlflow_run_id",
-        "duration_min",
+        "duration",
         "mlflow_params_kv",
         "mlflow_metrics_kv",
         "cause",
@@ -166,8 +164,9 @@ def main():
     # Phase 2.4: Extract metrics/params only when trained (key=value strings)
     params_kv = ""
     metrics_kv = ""
+    duration = ""
 
-    if is_trained == "true" and run_id:
+    if is_trained == "true":
         sh([
             "python", ".github/scripts/extract_mlflow_details.py",
             "--config", args.config,
@@ -179,6 +178,7 @@ def main():
 
         params_kv = (md.get("params_kv") or "").strip()
         metrics_kv = (md.get("metrics_kv") or "").strip()
+        duration = (md.get("duration") or "").strip()
 
 
     row = {
@@ -191,7 +191,7 @@ def main():
         "mlflow_project_detected": "Yes" if mlflow_project_detected else "No",
         "is_trained": is_trained,
         "mlflow_run_id": run_id,
-        "duration_min": (str(train_duration_min) if trained else ""),
+        "duration": (duration if run_id else ""),
         "mlflow_params_kv": params_kv,
         "mlflow_metrics_kv": metrics_kv,
         "cause": cause,
