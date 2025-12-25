@@ -133,7 +133,7 @@ def main():
     now = (dt.datetime.now(tz) if tz else dt.datetime.now().astimezone()).strftime("%Y-%m-%d %H:%M:%S")
 
     fieldnames = [
-        "timestamp_toronto",
+        "timestamp_local",
         "branch",
         "author",
         "commit_sha",
@@ -184,7 +184,7 @@ def main():
 
 
     row = {
-        "timestamp_toronto": now,
+        "timestamp_local": now,
         "branch": branch,
         "author": actor,
         "commit_sha": sha,
