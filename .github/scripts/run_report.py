@@ -146,11 +146,6 @@ def main():
         "mlflow_params_kv",
         "mlflow_metrics_kv",
         "cause",
-        "changed_files_count",
-        "script_path",
-        "data_paths",
-        "script_hit",
-        "data_hit",
     ]
 
     # Phase 2.4: Extract metrics/params only when trained (key=value strings)
@@ -197,7 +192,6 @@ def main():
         "mlflow_params_kv": params_kv,
         "mlflow_metrics_kv": metrics_kv,
         "cause": cause,
-        **(det.get("dbg", {}) or {}),
     }
 
     with open(row_json, "w", encoding="utf-8") as f:
