@@ -193,11 +193,11 @@ def main():
         missing_reason = "arg2pipeline/ found, but pipeline.json is missing (limited parsing)."
 
     changed_files = get_changed_files_single_commit(caller_root, sha) if sha else []
-    dbg["changed_files"] = ";".join(changed_files)
 
     cause = ""
     dbg = {
         "changed_files_count": str(len(changed_files)),
+        "changed_files": ";".join(changed_files),
         "script_path": "",
         "data_paths": "",
         "script_hit": "",
