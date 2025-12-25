@@ -99,6 +99,26 @@ def fmt_val(x: Any) -> str:
     except Exception:
         return "" if x in (None, "") else str(x)
 
+def fmt_kv_3dp(s: str) -> str:
+    """
+    Format a kv string like 'a=1.23456; b=0.9; c=abc' into 3dp for numeric values.
+    Preserves original key order as much as possible by processing segments in order.
+    """
+    s = (s or "").strip()
+    if not s:
+        return ""
+    parts = [p.strip() for p in s.split(";") if p.strip()]
+    out_parts: List[str] = []
+    for p in parts:
+        if "=" not in p:
+            out_parts.append(p)
+            continue
+        k, v = p.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        out_parts.append(f"{k}={fmt_val(v)}")
+    return "; ".join(out_parts)
+
 
 def arrow_delta(prev: Any, cur: Any) -> str:
     pa = safe_float(prev)
@@ -174,7 +194,7 @@ def main() -> int:
             seen.add(sha_i)
         trained_rows.append(r)
     trained_rows.reverse()
-    
+
     latest = trained_rows[-1] if trained_rows else None
     prev = trained_rows[-2] if len(trained_rows) >= 2 else None
 
@@ -223,6 +243,7 @@ def main() -> int:
     s1_cause = (latest.get("cause") if latest else "") or ""
     s1_params = (latest.get("mlflow_params_kv") if latest else "") or ""
     s1_metrics = (latest.get("mlflow_metrics_kv") if latest else "") or ""
+    s1_metrics = fmt_kv_3dp(s1_metrics)
     s1_dur = duration_min(latest) if latest else None
 
     cur_h = metric_from_row(latest, metric) if latest else None
@@ -316,19 +337,22 @@ def main() -> int:
 
     md.append("<table style='width:100%; table-layout:auto; border-collapse:collapse;'>")
     md.append("<thead><tr>"
-              "<th>Timestamp<br>(Toronto)</th>"
-              "<th>Branch</th>"
-              "<th>Author</th>"
-              "<th>Cause</th>"
-              f"<th>{html.escape(metric)}</th>"
-              f"<th>Δ{html.escape(metric)}</th>"
-              "<th>Duration<br>(min)</th>"
-              "<th>Commit</th>"
-              "</tr></thead><tbody>")
+          "<th>#</th>"
+          "<th>Timestamp</th>"
+          "<th>Branch</th>"
+          "<th>Author</th>"
+          "<th>Cause</th>"
+          f"<th>{html.escape(metric)}</th>"
+          f"<th>Δ{html.escape(metric)}</th>"
+          "<th>Duration<br>(min)</th>"
+          "<th>Commit</th>"
+          "</tr></thead><tbody>")
 
     # Use computed per-step delta; highlight sharp rows only (>= sharp_delta)
     for i, p in enumerate(pts):
+        idx = i + 1  # 1..N (matches SVG x-axis)
         val_txt = fmt_val(p["val"])
+
         # delta display: first point → 0
         if i == 0:
             d_txt = "→ 0.000"
@@ -339,6 +363,7 @@ def main() -> int:
             is_sharp = bool(p["sharp"])
 
         row_cells = [
+            f"<code>{idx}</code>",
             html.escape(p["ts"]),
             f"<code>{html.escape(p['branch'])}</code>",
             f"<code>{html.escape(p['author'])}</code>",
