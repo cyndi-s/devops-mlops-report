@@ -103,24 +103,48 @@ def parse_pipeline_for_script_and_data(pipeline_path: str) -> tuple[str | None, 
     walk(obj)
     return script, sorted(data_paths)
 
+def normalize_repo_rel_path(p: str) -> str:
+    """
+    Normalize a path so it can be compared with git-changed paths (repo-relative).
+    Handles GoMLOps patterns like '../<repo>/src/train.py' by stripping leading '../<something>/'.
+    """
+    p = (p or "").replace("\\", "/").strip()
+    p = p.lstrip("./")
+
+    # If GoMLOps emits '../<repo>/path', strip the first two segments: '..' + '<repo>'
+    if p.startswith("../"):
+        # ../<repo>/src/train.py -> src/train.py
+        parts = [x for x in p.split("/") if x]
+        if len(parts) >= 3 and parts[0] == "..":
+            p = "/".join(parts[2:])
+
+    return p
+
 
 def classify_cause(changed_files: list[str], script_path: str | None, data_paths: list[str]) -> tuple[str, dict]:
-    changed = [f.replace("\\", "/").lstrip("./") for f in changed_files]
+    changed = [normalize_repo_rel_path(f) for f in changed_files]
     script_hit = False
     data_hit = False
 
     script_prefixes: list[str] = []
     if script_path:
-        sp = script_path.replace("\\", "/").lstrip("./")
+        sp = normalize_repo_rel_path(script_path)
         script_prefixes.append(sp)
         if "/" in sp:
             script_prefixes.append(sp.rsplit("/", 1)[0] + "/")
 
+    # normalize data paths once
+    norm_data_paths = [normalize_repo_rel_path(dp).rstrip("/") for dp in (data_paths or []) if dp]
+
     for f in changed:
-        if any(f == p or f.startswith(p) for p in script_prefixes):
+        nf = normalize_repo_rel_path(f)
+
+        if any(nf == p or nf.startswith(p) for p in script_prefixes):
             script_hit = True
-        if any(f == dp or f.startswith(dp.rstrip("/") + "/") for dp in data_paths):
+
+        if any(nf == dp or nf.startswith(dp + "/") for dp in norm_data_paths if dp):
             data_hit = True
+
 
     if script_hit and data_hit:
         cause = "Both"
