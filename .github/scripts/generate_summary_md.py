@@ -179,7 +179,7 @@ def main() -> int:
         for r in rdr:
             rows.append({k: (v or "").strip() for k, v in (r or {}).items()})
 
-    rows.sort(key=lambda r: r.get("timestamp_toronto", ""))
+    rows.sort(key=lambda r: r.get("timestamp_local", ""))
 
     trained_rows_all = [r for r in rows if is_true(r.get("is_trained", ""))]
 
@@ -252,7 +252,7 @@ def main() -> int:
     badge_txt = "from this workflow run" if trained_this_run else "from a previous run"
     badge = f"<strong><ins><code>{html.escape(badge_txt)}</code></ins></strong>"
 
-    s1_ts = (latest.get("timestamp_toronto") if latest else "") or ""
+    s1_ts = (latest.get("timestamp_local") if latest else "") or ""
     s1_cause = (latest.get("cause") if latest else "") or ""
     s1_params = (latest.get("mlflow_params_kv") if latest else "") or ""
     s1_metrics = (latest.get("mlflow_metrics_kv") if latest else "") or ""
@@ -276,7 +276,7 @@ def main() -> int:
         sharp = (abs(d) >= sharp_delta) if prev_val is not None else False
         prev_val = v
         pts.append({
-            "ts": r.get("timestamp_toronto", ""),
+            "ts": r.get("timestamp_local", ""),
             "branch": r.get("branch", ""),
             "author": r.get("author", ""),
             "cause": r.get("cause", "None") or "None",

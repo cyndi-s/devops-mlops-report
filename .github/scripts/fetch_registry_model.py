@@ -109,7 +109,7 @@ def main() -> int:
             rows.append({k: (v or "").strip() for k, v in r.items()})
 
     # find latest trained run_id
-    rows.sort(key=lambda r: r.get("timestamp_toronto", ""))
+    rows.sort(key=lambda r: r.get("timestamp_local", ""))
     run_id = ""
     for r in reversed(rows):
         if is_true(r.get("is_trained", "")):

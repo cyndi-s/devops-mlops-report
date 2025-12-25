@@ -185,7 +185,7 @@ def main() -> int:
         for r in rdr:
             rows.append({k: (v or "").strip() for k, v in (r or {}).items()})
 
-    rows.sort(key=lambda r: r.get("timestamp_toronto", ""))
+    rows.sort(key=lambda r: r.get("timestamp_local", ""))
 
     trained_all = [r for r in rows if is_true(r.get("is_trained", ""))]
 
@@ -219,7 +219,7 @@ def main() -> int:
         sharp = (abs(d) >= sharp_delta) if prev is not None else False
         prev = v
 
-        timestamps.append(r.get("timestamp_toronto", ""))
+        timestamps.append(r.get("timestamp_local", ""))
         vals.append(v)
         sharp_flags.append(sharp)
 
