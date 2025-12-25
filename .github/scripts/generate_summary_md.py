@@ -226,14 +226,27 @@ def main() -> int:
         m = parse_kv(r.get("mlflow_metrics_kv", ""))
         return safe_float(m.get(key))
 
-    def duration_min(r: Dict[str, str]) -> Optional[float]:
-        # expect a dedicated column in CSV (recommended)
-        d = safe_float(r.get("duration_min"))
-        if d is not None:
-            return d
-        # fallback: if someone stored in metrics_kv as duration_min=...
-        m = parse_kv(r.get("mlflow_metrics_kv", ""))
-        return safe_float(m.get("duration_min"))
+    def duration_str(r: Dict[str, str]) -> str:
+        # preferred: dedicated string column from MLflow ("12s", "3m 12s")
+        s = (r.get("duration") or "").strip()
+        if s:
+            return s
+
+        # fallback: old numeric minutes column if it exists
+        dm = safe_float(r.get("duration_min"))
+        if dm is None:
+            m = parse_kv(r.get("mlflow_metrics_kv", ""))
+            dm = safe_float(m.get("duration_min"))
+
+        if dm is None:
+            return ""
+
+        total_sec = int(round(dm * 60))
+        if total_sec < 60:
+            return f"{total_sec}s"
+        m_, s_ = divmod(total_sec, 60)
+        return f"{m_}m {s_}s"
+
 
     # ---- Section 1 data ----
     badge_txt = "from this workflow run" if trained_this_run else "from a previous run"
@@ -244,7 +257,7 @@ def main() -> int:
     s1_params = (latest.get("mlflow_params_kv") if latest else "") or ""
     s1_metrics = (latest.get("mlflow_metrics_kv") if latest else "") or ""
     s1_metrics = fmt_kv_3dp(s1_metrics)
-    s1_dur = duration_min(latest) if latest else None
+    s1_dur = duration_str(latest) if latest else ""
 
     cur_h = metric_from_row(latest, metric) if latest else None
     prev_h = metric_from_row(prev, metric) if prev else None
@@ -270,7 +283,7 @@ def main() -> int:
             "val": v,
             "delta": d,
             "sharp": sharp,
-            "dur": duration_min(r),
+            "dur": duration_str(r),
             "sha": r.get("commit_sha", ""),
         })
 
@@ -312,7 +325,7 @@ def main() -> int:
                   "<th>Parameters</th>"
                   "<th>Metrics</th>"
                   f"<th>Δ{html.escape(metric)}</th>"
-                  "<th>Duration<br>(min)</th>"
+                  "<th>Duration</th>"
                   "</tr></thead><tbody><tr>")
 
         cells = [
@@ -344,7 +357,7 @@ def main() -> int:
           "<th>Cause</th>"
           f"<th>{html.escape(metric)}</th>"
           f"<th>Δ{html.escape(metric)}</th>"
-          "<th>Duration<br>(min)</th>"
+          "<th>Duration</th>"
           "<th>Commit</th>"
           "</tr></thead><tbody>")
 
@@ -370,7 +383,7 @@ def main() -> int:
             f"<code>{html.escape(p['cause'])}</code>",
             html.escape(val_txt),
             html.escape(d_txt),
-            html.escape(fmt_val(p["dur"]) if p["dur"] is not None else ""),
+            html.escape(p["dur"] or ""),
             commit_link(p["sha"]),
         ]
 
