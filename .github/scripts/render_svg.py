@@ -4,15 +4,12 @@ import json
 import os
 import re
 import time
-from datetime import datetime
 from io import StringIO
 from typing import Any, Dict, List, Optional
 from urllib import request, error
 
 import yaml
-
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 
 
 CSV_NAME_DEFAULT = "commitHistory.csv"
@@ -109,18 +106,11 @@ def moving_average(vals: List[float], k: int = 3) -> List[Optional[float]]:
 
 
 def build_svg(timestamps: List[str], vals: List[float], sharp_flags: List[bool], metric: str, sharp_delta: float) -> str:
-    # Matplotlib SVG to match POC-Mobile style (grid, axes, rotated ticks, legend)
+    # x-axis is Run # (1..N), matching the Trend table numbering
     if not vals:
         return "<svg xmlns='http://www.w3.org/2000/svg'></svg>"
 
-    # Parse timestamps (commitHistory uses "%Y-%m-%d %H:%M:%S")
-    xs: List[datetime] = []
-    for t in timestamps:
-        try:
-            xs.append(datetime.strptime((t or "").strip(), "%Y-%m-%d %H:%M:%S"))
-        except Exception:
-            # fallback: keep ordering using "now" if parse fails
-            xs.append(datetime.now())
+    xs = list(range(1, len(vals) + 1))
 
     fig, ax = plt.subplots(figsize=(12, 4.8), dpi=120)
 
@@ -145,26 +135,24 @@ def build_svg(timestamps: List[str], vals: List[float], sharp_flags: List[bool],
         ax.plot(ma_x, ma_y, label="3-run MA", linewidth=2, alpha=0.7)
 
     ax.set_title(f"Model Performance ({metric})")
+    ax.set_xlabel("Run #")
     ax.set_ylabel(f"Performance ({metric})")
 
     # grid like your example
     ax.grid(True, linestyle="--", alpha=0.4)
 
-    # nicer datetime ticks + rotation like POC-Mobile
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
-    for label in ax.get_xticklabels():
-        label.set_rotation(45)
-        label.set_ha("right")
+    # show all ticks 1..N (N <= trend_window, usually 10)
+    ax.set_xticks(xs)
 
     ax.legend(loc="best")
     fig.tight_layout()
 
-    # return SVG string
     from io import StringIO as _StringIO
     buf = _StringIO()
     fig.savefig(buf, format="svg")
     plt.close(fig)
     return buf.getvalue()
+
 
 
 
