@@ -121,7 +121,7 @@ def build_svg(timestamps: List[str], vals: List[float], sharp_flags: List[bool],
     sharp_x = [xs[i] for i, f in enumerate(sharp_flags) if f]
     sharp_y = [vals[i] for i, f in enumerate(sharp_flags) if f]
     if sharp_x:
-        ax.scatter(sharp_x, sharp_y, label=f"sharp change (≥ {sharp_delta})", zorder=5)
+        ax.scatter(sharp_x, sharp_y, c="red", label=f"sharp change (≥ {sharp_delta})", zorder=5)
 
     # median line
     med = median(vals)
