@@ -140,13 +140,12 @@ def classify_cause(changed_files: list[str], script_path: str | None, data_paths
     norm_data_paths = [normalize_repo_rel_path(dp).rstrip("/") for dp in (data_paths or []) if dp]
 
     for f in changed:
-        nf = normalize_repo_rel_path(f)
-
-        if any(nf == p or nf.startswith(p) for p in script_prefixes):
+        if any(f == p or f.startswith(p) for p in script_prefixes):
             script_hit = True
 
-        if any(nf == dp or nf.startswith(dp + "/") for dp in norm_data_paths if dp):
+        if any(f == dp or f.startswith(dp + "/") for dp in norm_data_paths if dp):
             data_hit = True
+
 
 
     if script_hit and data_hit:
@@ -160,7 +159,7 @@ def classify_cause(changed_files: list[str], script_path: str | None, data_paths
 
     dbg = {
         "changed_files_count": str(len(changed)),
-        "script_path": script_path or "",
+        "script_path": normalize_repo_rel_path(script_path) if script_path else "",
         "data_paths": ";".join(data_paths),
         "script_hit": str(script_hit),
         "data_hit": str(data_hit),
@@ -193,13 +192,10 @@ def main():
         missing_reason = "arg2pipeline/ found, but pipeline.json is missing (limited parsing)."
 
     changed_files = get_changed_files_single_commit(caller_root, sha) if sha else []
-    print(f"[detect] sha={sha}")
-    print(f"[detect] changed_files_count={len(changed_files)}")
-    print(f"[detect] changed_files={changed_files}")
+    
     cause = ""
     dbg = {
         "changed_files_count": str(len(changed_files)),
-        "changed_files": ";".join(changed_files),
         "script_path": "",
         "data_paths": "",
         "script_hit": "",
