@@ -110,19 +110,11 @@ def main():
     run_id = (tr.get("run_id") or "").strip()
     trained = bool(tr.get("trained"))  # NEW
     is_trained = "true" if trained else "false"
-
+    
     # Ground truth: training happened in THIS workflow run (even if run_id missing)
     os.environ["TRAINED_THIS_RUN"] = "true" if trained else "false"
 
-    # Keep a small mlflow_json for summary compatibility (generate_summary_md.py expects it)
-    ml = {
-        "is_trained": is_trained,
-        "run_id": run_id,
-        "reason": tr.get("reason", ""),
-        "duration": (duration if trained else ""),
-    }
-    with open(mlflow_json, "w", encoding="utf-8") as f:
-        json.dump(ml, f, indent=2)
+    
     # 2) Prepare DevOps payload for summary (tested format)
     devops_payload = {
         "branch": branch,
@@ -179,6 +171,16 @@ def main():
         params_kv = (md.get("params_kv") or "").strip()
         metrics_kv = (md.get("metrics_kv") or "").strip()
         duration = (md.get("duration") or "").strip()
+
+    # Keep a small mlflow_json for summary compatibility (generate_summary_md.py expects it)
+    ml = {
+        "is_trained": is_trained,
+        "run_id": run_id,
+        "reason": tr.get("reason", ""),
+        "duration": (duration if trained else ""),
+    }
+    with open(mlflow_json, "w", encoding="utf-8") as f:
+        json.dump(ml, f, indent=2)
 
 
     row = {
