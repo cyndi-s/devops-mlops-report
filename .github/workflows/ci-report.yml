@@ -57,3 +57,11 @@ jobs:
         run: |
           python .github/scripts/run_report.py \
             --config ../caller/${CONFIG_PATH}
+
+      - name: show detect.json
+        shell: bash
+        run: |
+          echo "== detect.json path check =="
+          ls -la .github/scripts/.work || true
+          echo "== detect.json contents =="
+          cat .github/scripts/.work/detect.json || true
