@@ -119,7 +119,7 @@ def main():
         "is_trained": is_trained,
         "run_id": run_id,
         "reason": tr.get("reason", ""),
-        "duration_min": train_duration_min if trained else "",
+        "duration": (duration if trained else ""),
     }
     with open(mlflow_json, "w", encoding="utf-8") as f:
         json.dump(ml, f, indent=2)
