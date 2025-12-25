@@ -58,14 +58,4 @@ jobs:
           python .github/scripts/run_report.py \
             --config ../caller/${CONFIG_PATH}
 
-      - name: show detect.json
-        shell: bash
-        run: |
-          echo "PWD:"
-          pwd
-          echo "== list workspace root =="
-          ls -la
-          echo "== list app/.github/scripts/.work =="
-          ls -la app/.github/scripts/.work || true
-          echo "== detect.json contents =="
-          cat app/.github/scripts/.work/detect.json || true
+    

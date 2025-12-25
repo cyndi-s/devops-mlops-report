@@ -106,38 +106,47 @@ def parse_pipeline_for_script_and_data(pipeline_path: str) -> tuple[str | None, 
     walk(obj)
     return script, sorted(data_paths)
 
-def normalize_repo_rel_path(p: str) -> str:
+def normalize_repo_rel_path(p: str, repo_hints: set[str] | None = None) -> str:
     """
-    Normalize a path so it can be compared with git-changed paths (repo-relative).
-    Handles GoMLOps patterns like '../<repo>/src/train.py' by stripping leading '../<something>/'.
+    Normalize to repo-relative paths (like git changed files).
+    Handles:
+      - ../<repo>/path  -> path
+      - <repo>/path     -> path   (GoMLOps sometimes emits this)
     """
     p = (p or "").replace("\\", "/").strip()
     p = p.lstrip("./")
 
-    # If GoMLOps emits '../<repo>/path', strip the first two segments: '..' + '<repo>'
+    # ../<repo>/src/train.py -> src/train.py
     if p.startswith("../"):
-        # ../<repo>/src/train.py -> src/train.py
         parts = [x for x in p.split("/") if x]
         if len(parts) >= 3 and parts[0] == "..":
             p = "/".join(parts[2:])
+
+    # <repo>/src/train.py -> src/train.py (only if <repo> matches known hints)
+    if repo_hints:
+        for rh in repo_hints:
+            rh = (rh or "").strip().strip("/")
+            if rh and p.startswith(rh + "/"):
+                p = p[len(rh) + 1 :]
+                break
 
     return p
 
 
 def classify_cause(changed_files: list[str], script_path: str | None, data_paths: list[str]) -> tuple[str, dict]:
-    changed = [normalize_repo_rel_path(f) for f in changed_files]
+    changed = [normalize_repo_rel_path(f, REPO_HINTS) for f in changed_files]
     script_hit = False
     data_hit = False
 
     script_prefixes: list[str] = []
     if script_path:
-        sp = normalize_repo_rel_path(script_path)
+        sp = normalize_repo_rel_path(script_path,REPO_HINTS)
         script_prefixes.append(sp)
         if "/" in sp:
             script_prefixes.append(sp.rsplit("/", 1)[0] + "/")
 
     # normalize data paths once
-    norm_data_paths = [normalize_repo_rel_path(dp).rstrip("/") for dp in (data_paths or []) if dp]
+    norm_data_paths = [normalize_repo_rel_path(dp, REPO_HINTS).rstrip("/") for dp in (data_paths or []) if dp]
 
     for f in changed:
         if any(f == p or f.startswith(p) for p in script_prefixes):
@@ -201,6 +210,23 @@ def main():
         "script_hit": "",
         "data_hit": "",
     }
+
+    global REPO_HINTS
+    REPO_HINTS = set()
+
+    # hint from GitHub context (caller repo name)
+    repo_full = os.getenv("GITHUB_REPOSITORY", "")  # like "cyndi-s/mlops-ci-demo"
+    if repo_full and "/" in repo_full:
+        REPO_HINTS.add(repo_full.split("/")[-1])
+
+    # hint from MLproject name if you already parse it (add if you have it)
+    # example variable name: project_name
+    try:
+        if project_name:
+            REPO_HINTS.add(project_name)
+    except Exception:
+        pass
+
 
     if mlflow_project_detected:
         script_from_mlproject = parse_mlproject_for_script(mlproject)
