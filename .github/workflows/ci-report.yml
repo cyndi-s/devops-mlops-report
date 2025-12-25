@@ -58,7 +58,7 @@ jobs:
           python .github/scripts/run_report.py \
             --config ../caller/${CONFIG_PATH}
 
-      - name: Debug: show detect.json
+      - name: show detect.json
         shell: bash
         run: |
           echo "PWD:"
