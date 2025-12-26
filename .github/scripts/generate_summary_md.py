@@ -119,6 +119,19 @@ def fmt_kv_3dp(s: str) -> str:
         out_parts.append(f"{k}={fmt_val(v)}")
     return "; ".join(out_parts)
 
+def fmt_bytes(n: int) -> str:
+    try:
+        n = int(n or 0)
+    except Exception:
+        return ""
+    units = ["B", "KB", "MB", "GB"]
+    v = float(n)
+    i = 0
+    while v >= 1024 and i < len(units) - 1:
+        v /= 1024.0
+        i += 1
+    return f"{v:.1f} {units[i]}" if i > 0 else f"{int(v)} {units[i]}"
+
 
 def arrow_delta(prev: Any, cur: Any) -> str:
     pa = safe_float(prev)
@@ -155,6 +168,7 @@ def main() -> int:
     ap.add_argument("--svg-json", required=True)
     ap.add_argument("--model-json", required=True)
     ap.add_argument("--devops-json", required=True)
+    ap.add_argument("--artifacts-json", required=True)
     args = ap.parse_args()
 
     token = (os.environ.get("GIST_TOKEN") or "").strip()
@@ -219,7 +233,17 @@ def main() -> int:
 
     with open(args.devops_json, "r", encoding="utf-8") as f:
         dev = json.load(f) or {}
+    # status from devops_json (fallback to env, then "Unknown")
+    workflow_status = (dev.get("status") or dev.get("workflow_status") or "").strip()
+    if not workflow_status:
+        workflow_status = (os.environ.get("WORKFLOW_STATUS") or "").strip()
+    if not workflow_status:
+        workflow_status = "Unknown"
 
+    with open(args.artifacts_json, "r", encoding="utf-8") as f:
+        aj = json.load(f) or {}
+    run_url = (aj.get("run_url") or "").strip()
+    artifact_items = aj.get("items") or []
 
     # ---- helpers ----
     def metric_from_row(r: Dict[str, str], key: str) -> Optional[float]:
@@ -335,7 +359,7 @@ def main() -> int:
             f"<code>{html.escape(s1_params)}</code>",
             f"<code>{html.escape(s1_metrics)}</code>",
             f"<code>{html.escape(arrow_delta(prev_h, cur_h))}</code>",
-            html.escape(fmt_val(s1_dur) if s1_dur is not None else ""),
+            html.escape(s1_dur or ""),
         ]
         for c in cells:
             md.append(f"<td style='text-align:center; vertical-align:middle; word-break:break-word; max-width:100%'>{c}</td>")
@@ -407,12 +431,46 @@ def main() -> int:
         commit_url = f"{server}/{repo}/commit/{sha}"
         md.append(f'- **Commit:** <a href="{html.escape(commit_url)}"><code>{html.escape(sha[:7])}</code> — {html.escape(commit_msg)}</a>\n')
     md.append(f"- **Model source:** {html.escape(model_source)}\n")
-    md.append("- **Status:** Success\n")
+    md.append(f"- **Status:** <code>{html.escape(workflow_status)}</code>\n")
     if finished_at:
         md.append(f"- **Job finished at:** {html.escape(finished_at)}\n")
 
 
-    md.append("\n## 4) Artifacts\n\nPlaceholder (Phase 2.6)\n\n")
+    md.append("\n## 4) Artifacts\n\n")
+
+    # 4.1 GitHub run artifacts (downloadables)
+    md.append("### 4.1 GitHub Run Artifacts\n\n")
+    if not artifact_items:
+        md.append("- No artifacts uploaded for this run.\n")
+    else:
+        md.append(f"- Artifacts uploaded for this run ({len(artifact_items)}):\n")
+        for a in artifact_items:
+            name = html.escape((a.get("name") or "").strip())
+            size = fmt_bytes(a.get("size_in_bytes") or 0)
+            expired = bool(a.get("expired"))
+            suffix = " (expired)" if expired else ""
+            md.append(f"  - <code>{name}</code> — {html.escape(size)}{suffix}\n")
+
+    if run_url:
+        md.append(f'- View/download: <a href="{html.escape(run_url)}">Workflow run artifacts</a>\n')
+
+    # 4.2 MLflow/DagsHub artifacts (tracking)
+    md.append("\n### 4.2 MLflow/DagsHub Artifacts\n\n")
+    tracking_uri = str((cfg.get("mlflow") or {}).get("tracking_uri") or "").strip()
+    if tracking_uri:
+        md.append(f'- MLflow tracking: <a href="{html.escape(tracking_uri)}">{html.escape(tracking_uri)}</a>\n')
+    else:
+        md.append("- MLflow tracking: (not configured)\n")
+
+    # Optional: if you already have these variables in your script
+    if latest:
+        rid = (latest.get("mlflow_run_id") or "").strip()
+        if rid:
+            md.append(f"- Latest run id: <code>{html.escape(rid)}</code>\n")
+    if model_version:
+        md.append(f"- Registry model version: <code>{html.escape(model_version)}</code>\n")
+
+
     md.append("## 5) Commit History\n\n")
     md.append(f"- **Commit History:** [commitHistory.csv](https://gist.github.com/{html.escape(gist_id)})\n\n")
 
