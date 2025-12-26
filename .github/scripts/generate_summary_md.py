@@ -439,7 +439,7 @@ def main() -> int:
     md.append("\n## 4) Artifacts\n\n")
 
     # 4.1 GitHub run artifacts (downloadables)
-    md.append("### 4.1 GitHub Run Artifacts\n\n")
+    md.append("**a) GitHub Run Artifacts**\n\n")
     if not artifact_items:
         md.append("- No artifacts uploaded for this run.\n")
     else:
@@ -451,24 +451,27 @@ def main() -> int:
             suffix = " (expired)" if expired else ""
             md.append(f"  - <code>{name}</code> — {html.escape(size)}{suffix}\n")
 
-    if run_url:
+    if artifact_items and run_url:
         md.append(f'- View/download: <a href="{html.escape(run_url)}">Workflow run artifacts</a>\n')
 
-    # 4.2 MLflow/DagsHub artifacts (tracking)
-    md.append("\n### 4.2 MLflow/DagsHub Artifacts\n\n")
-    tracking_uri = str((cfg.get("mlflow") or {}).get("tracking_uri") or "").strip()
-    if tracking_uri:
-        md.append(f'- MLflow tracking: <a href="{html.escape(tracking_uri)}">{html.escape(tracking_uri)}</a>\n')
-    else:
-        md.append("- MLflow tracking: (not configured)\n")
 
-    # Optional: if you already have these variables in your script
-    if latest:
-        rid = (latest.get("mlflow_run_id") or "").strip()
-        if rid:
-            md.append(f"- Latest run id: <code>{html.escape(rid)}</code>\n")
-    if model_version:
-        md.append(f"- Registry model version: <code>{html.escape(model_version)}</code>\n")
+    # 4.2 MLflow/DagsHub artifacts (tracking)
+    md.append("\n**b) MLflow Artifacts (tracking UI)**\n\n")
+    tracking_uri = str((cfg.get("mlflow") or {}).get("tracking_uri") or "").strip()
+    rid = (latest.get("mlflow_run_id") or "").strip() if latest else ""
+    src_tag = "this workflow run" if trained_this_run else "previous run"
+
+    if tracking_uri and rid:
+        exp_id = (latest.get("experiment_id") or "").strip() if latest else ""
+        if not exp_id:
+            exp_id = "0"  # fallback
+        run_link = f"{tracking_uri}/#/experiments/{exp_id}/runs/{rid}"
+        md.append(
+            f'- MLflow run (tracking UI, {html.escape(src_tag)}): '
+            f'<a href="{html.escape(run_link)}"><code>{html.escape(rid)}</code></a>\n'
+        )
+    else:
+        md.append("- MLflow run (tracking UI): Not available (missing tracking_uri or run_id)\n")
 
 
     md.append("## 5) Commit History\n\n")
