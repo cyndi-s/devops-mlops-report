@@ -113,6 +113,11 @@ def build_svg(timestamps: List[str], vals: List[float], sharp_flags: List[bool],
     xs = list(range(1, len(vals) + 1))
 
     fig, ax = plt.subplots(figsize=(12, 4.8), dpi=120)
+    # Make axes L-shaped (left + bottom only)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(top=False, right=False)
+
 
     # main line
     ax.plot(xs, vals, marker="o", label=metric)
