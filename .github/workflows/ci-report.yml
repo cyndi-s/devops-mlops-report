@@ -16,6 +16,9 @@ on:
 jobs:
   report:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     steps:
       # 1) Checkout the caller repo (mlops-ci-demo) to read report-config.yml
       - name: Checkout caller repo
@@ -49,6 +52,7 @@ jobs:
       - name: Run devops-mlops-report
         working-directory: app
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           CONFIG_PATH: ${{ inputs.config_path }}
           WORKFLOW_STATUS: ${{ job.status }}
