@@ -5,6 +5,7 @@ import os
 import subprocess
 import time
 from zoneinfo import ZoneInfo
+from urllib import request
 
 import yaml
 
@@ -32,6 +33,42 @@ def git_log_subject(repo_dir: str, sha: str) -> str:
         return out.decode("utf-8", errors="ignore").strip()
     except Exception:
         return ""
+
+def list_run_artifacts(repo: str, run_id: str, token: str) -> dict:
+    """
+    Observer-only: lists GitHub Actions artifacts uploaded for the *current run*.
+    Returns:
+      {
+        "run_url": "https://github.com/<repo>/actions/runs/<run_id>",
+        "items": [{"name": "...", "size_in_bytes": 123, "expired": false}, ...]
+      }
+    """
+    if not (repo and run_id and token):
+        return {"run_url": "", "items": []}
+
+    api_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "devops-mlops-report",
+    }
+
+    req = request.Request(api_url, headers=headers, method="GET")
+    with request.urlopen(req) as resp:
+        data = json.loads(resp.read().decode("utf-8") or "{}")
+
+    items = []
+    for a in (data.get("artifacts") or []):
+        items.append({
+            "name": (a.get("name") or "").strip(),
+            "size_in_bytes": int(a.get("size_in_bytes") or 0),
+            "expired": bool(a.get("expired")),
+        })
+
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    run_url = f"{server_url}/{repo}/actions/runs/{run_id}"
+    return {"run_url": run_url, "items": items}
+
 
 
 def main():
@@ -78,6 +115,7 @@ def main():
     ml_details_json = os.path.join(workdir, "ml_details.json")
     svg_json = os.path.join(workdir, "svg.json")
     model_json = os.path.join(workdir, "model.json")
+    artifacts_json = os.path.join(workdir, "artifacts.json")
 
     # 1) Detect MLflow project + cause attribution (tested)
     sh([
@@ -213,13 +251,22 @@ def main():
         "--gist-url", gist_url,
         "--out", model_json])
 
+    # 5.5) List GitHub Actions artifacts for THIS run (metadata only)
+    run_id_env = os.environ.get("GITHUB_RUN_ID", "").strip()
+    gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
+
+    artifacts_payload = list_run_artifacts(repo, run_id_env, gh_token)
+    with open(artifacts_json, "w", encoding="utf-8") as f:
+        json.dump(artifacts_payload, f, indent=2)
+
     # 6) Summary markdown (CSV-only for Sections 1 & 2)
     sh(["python", ".github/scripts/generate_summary_md.py",
         "--config", args.config,
         "--gist-url", gist_url,
         "--svg-json", svg_json,
         "--model-json", model_json,
-        "--devops-json", devops_json])
+        "--devops-json", devops_json,
+        "--artifacts-json", artifacts_json])
 
     # 7) Optional prune (fixed policy: private -> max 90)
     repo_visibility = str(cfg.get("repo_visibility") or "").strip().lower()
