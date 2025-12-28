@@ -14,6 +14,19 @@ from zoneinfo import ZoneInfo
 import yaml
 
 CSV_NAME_DEFAULT = "commitHistory.csv"
+FIXED_MLFLOW_MISSING_MSG_MD = """
+**MLflow project not detected**
+
+No `MLproject` file was found in this repository.
+
+The `devops-mlops-report` expects an MLflow Project with MLflow runs
+(metrics and params logged to an MLflow tracking server).
+
+You can generate an MLproject file using the [GoMLOps](https://github.com/yorku-ease/GoMLOps) tool.
+
+After adding `MLproject` file and `arg2pipeline/` folder, re-run this workflow.
+""".strip()
+
 
 def get_tz(cfg: dict):
     name = str(cfg.get("timezone") or "").strip()
@@ -233,6 +246,7 @@ def main() -> int:
 
     with open(args.devops_json, "r", encoding="utf-8") as f:
         dev = json.load(f) or {}
+    mlflow_project_detected = str(dev.get("mlflow_project_detected", "")).lower() in ("yes", "true", "1")
     # status from devops_json (fallback to env, then "Unknown")
     workflow_status = (dev.get("status") or dev.get("workflow_status") or "").strip()
     if not workflow_status:
@@ -338,6 +352,9 @@ def main() -> int:
 
     # Section 1
     md.append(f"## 1) Latest Trained Model: {badge}\n\n")
+    if not mlflow_project_detected:
+        md.append(FIXED_MLFLOW_MISSING_MSG_MD + "\n\n")
+
     if not latest:
         md.append("_No trained model found in commitHistory.csv yet._\n\n")
     else:

@@ -6,6 +6,12 @@ on:
       config_path:
         required: true
         type: string
+      upstream_run_id:
+        required: false
+        type: string
+      upstream_run_url:
+        required: false
+        type: string
     secrets:
       GIST_TOKEN:
         required: true
@@ -56,6 +62,8 @@ jobs:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           CONFIG_PATH: ${{ inputs.config_path }}
           WORKFLOW_STATUS: ${{ job.status }}
+          UPSTREAM_RUN_ID: ${{ inputs.upstream_run_id }}
+          UPSTREAM_RUN_URL: ${{ inputs.upstream_run_url }}
           MLFLOW_TRACKING_USERNAME: ${{ github.repository_owner }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
