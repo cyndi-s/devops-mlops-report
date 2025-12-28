@@ -17,14 +17,14 @@ CSV_NAME_DEFAULT = "commitHistory.csv"
 FIXED_MLFLOW_MISSING_MSG_MD = """
 **MLflow project not detected**
 
-No `MLproject` file was found in this repository.
+No `MLproject` file was found in this **repository root**.
 
 The `devops-mlops-report` expects an MLflow Project with MLflow runs
 (metrics and params logged to an MLflow tracking server).
 
-You can generate an MLproject file using the [GoMLOps](https://github.com/yorku-ease/GoMLOps) tool.
+You can generate an `MLproject` file using the [GoMLOps](https://github.com/yorku-ease/GoMLOps) tool.
 
-After adding `MLproject` file and `arg2pipeline/` folder, re-run this workflow.
+After adding `MLproject` file and `arg2pipeline/` folder at the repository root, re-run this workflow.
 """.strip()
 
 
@@ -351,36 +351,39 @@ def main() -> int:
     md.append("# Pipeline Summary\n\n")
 
     # Section 1
-    md.append(f"## 1) Latest Trained Model: {badge}\n\n")
     if not mlflow_project_detected:
+        # 1) No badge in this scenario
+        md.append("## 1) Latest Trained Model\n\n")
         md.append(FIXED_MLFLOW_MISSING_MSG_MD + "\n\n")
-
-    if not latest:
-        md.append("_No trained model found in commitHistory.csv yet._\n\n")
+        
     else:
-        md.append("<table style='width:100%; text-align:center;'>")
-        md.append("<thead><tr>"
-                  "<th>Timestamp<br>(Toronto)</th>"
-                  "<th>model_version</th>"
-                  "<th>Cause</th>"
-                  "<th>Parameters</th>"
-                  "<th>Metrics</th>"
-                  f"<th>Δ{html.escape(metric)}</th>"
-                  "<th>Duration</th>"
-                  "</tr></thead><tbody><tr>")
+        md.append(f"## 1) Latest Trained Model: {badge}\n\n")
+        if not latest:
+            md.append("_No trained model found in commitHistory.csv yet._\n\n")
+        else:
+            md.append("<table style='width:100%; text-align:center;'>")
+            md.append("<thead><tr>"
+                    "<th>Timestamp<br>(Toronto)</th>"
+                    "<th>model_version</th>"
+                    "<th>Cause</th>"
+                    "<th>Parameters</th>"
+                    "<th>Metrics</th>"
+                    f"<th>Δ{html.escape(metric)}</th>"
+                    "<th>Duration</th>"
+                    "</tr></thead><tbody><tr>")
 
-        cells = [
-            html.escape(s1_ts),
-            f"<code>{html.escape(mv_cell)}</code>",
-            f"<code>{html.escape(s1_cause)}</code>",
-            f"<code>{html.escape(s1_params)}</code>",
-            f"<code>{html.escape(s1_metrics)}</code>",
-            f"<code>{html.escape(arrow_delta(prev_h, cur_h))}</code>",
-            html.escape(s1_dur or ""),
-        ]
-        for c in cells:
-            md.append(f"<td style='text-align:center; vertical-align:middle; word-break:break-word; max-width:100%'>{c}</td>")
-        md.append("</tr></tbody></table>\n\n")
+            cells = [
+                html.escape(s1_ts),
+                f"<code>{html.escape(mv_cell)}</code>",
+                f"<code>{html.escape(s1_cause)}</code>",
+                f"<code>{html.escape(s1_params)}</code>",
+                f"<code>{html.escape(s1_metrics)}</code>",
+                f"<code>{html.escape(arrow_delta(prev_h, cur_h))}</code>",
+                html.escape(s1_dur or ""),
+            ]
+            for c in cells:
+                md.append(f"<td style='text-align:center; vertical-align:middle; word-break:break-word; max-width:100%'>{c}</td>")
+            md.append("</tr></tbody></table>\n\n")
 
     # Section 2
     md.append(f"## 2) Model Performance ({html.escape(metric)})\n\n")
