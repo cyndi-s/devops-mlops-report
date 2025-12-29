@@ -252,19 +252,11 @@ def main():
         "--gist-url", gist_url,
         "--out", model_json])
 
-    # 5.5) List GitHub Actions artifacts (upstream run if provided, else current run)
-    upstream_run_id = (os.environ.get("UPSTREAM_RUN_ID") or "").strip()
-    upstream_run_url = (os.environ.get("UPSTREAM_RUN_URL") or "").strip()
-
-    run_id_for_artifacts = upstream_run_id or os.environ.get("GITHUB_RUN_ID", "").strip()
+    # 5.5) List GitHub Actions artifacts for THIS run (metadata only)
+    run_id_env = os.environ.get("GITHUB_RUN_ID", "").strip()
     gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
 
-    artifacts_payload = list_run_artifacts(repo, run_id_for_artifacts, gh_token)
-
-    # Prefer upstream run URL if present
-    if upstream_run_url:
-        artifacts_payload["run_url"] = upstream_run_url
-
+    artifacts_payload = list_run_artifacts(repo, run_id_env, gh_token)
     with open(artifacts_json, "w", encoding="utf-8") as f:
         json.dump(artifacts_payload, f, indent=2)
 
