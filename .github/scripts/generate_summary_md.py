@@ -234,6 +234,17 @@ def main() -> int:
             if (r.get("commit_sha") or "").strip() == sha:
                 trained_this_run = is_true(r.get("is_trained", ""))
                 break
+    
+    # ---- Does CSV contain ANY model signal? ----
+    # (Used to decide whether to show Section 1 badge + Section 3 Model source)
+    def row_has_model_signal(r: Dict[str, str]) -> bool:
+        return bool(
+            (r.get("mlflow_run_id") or "").strip()
+            or (r.get("model_version") or "").strip()
+        )
+
+    has_any_model_info = trained_this_run or any(row_has_model_signal(r) for r in rows)
+
 
     # ---- SVG/model json ----
     with open(args.svg_json, "r", encoding="utf-8") as f:
@@ -344,7 +355,10 @@ def main() -> int:
     finished_at = (dev.get("finished_at") or "").strip()
 
 
-    model_source = "Trained in this run" if trained_this_run else "From previous run"
+    model_source = ""
+    if has_any_model_info:
+        model_source = "Trained in this run" if trained_this_run else "From previous run"
+
 
     # ---- Write summary ----
     md: List[str] = []
@@ -357,7 +371,12 @@ def main() -> int:
         md.append(FIXED_MLFLOW_MISSING_MSG_MD + "\n\n")
         
     else:
-        md.append(f"## 1) Latest Trained Model: {badge}\n\n")
+       # Show badge ONLY when we have any model info
+        if has_any_model_info:
+            md.append(f"## 1) Latest Trained Model: {badge}\n\n")
+        else:
+            md.append("## 1) Latest Trained Model\n\n")
+
         if not latest:
             md.append("_No trained model found in commitHistory.csv yet._\n\n")
         else:
@@ -450,33 +469,19 @@ def main() -> int:
     if sha and repo:
         commit_url = f"{server}/{repo}/commit/{sha}"
         md.append(f'- **Commit:** <a href="{html.escape(commit_url)}"><code>{html.escape(sha[:7])}</code> — {html.escape(commit_msg)}</a>\n')
-    md.append(f"- **Model source:** {html.escape(model_source)}\n")
+    if model_source:
+        md.append(f"- **Model source:** {html.escape(model_source)}\n")
     md.append(f"- **Status:** <code>{html.escape(workflow_status)}</code>\n")
     if finished_at:
         md.append(f"- **Job finished at:** {html.escape(finished_at)}\n")
 
 
-    md.append("\n## 4) Artifacts\n\n")
-
-    # 4.1 GitHub run artifacts (downloadables)
-    md.append("**a) GitHub Run Artifacts**\n\n")
-    if not artifact_items:
-        md.append("- No artifacts uploaded for this run.\n")
-    else:
-        md.append(f"- Artifacts uploaded for this run ({len(artifact_items)}):\n")
-        for a in artifact_items:
-            name = html.escape((a.get("name") or "").strip())
-            size = fmt_bytes(a.get("size_in_bytes") or 0)
-            expired = bool(a.get("expired"))
-            suffix = " (expired)" if expired else ""
-            md.append(f"  - <code>{name}</code> — {html.escape(size)}{suffix}\n")
-
-    if artifact_items and run_url:
-        md.append(f'- View/download: <a href="{html.escape(run_url)}">Workflow run artifacts</a>\n')
+    md.append("## 4) Commit History\n\n")
+    md.append(f"- **Commit History:** [commitHistory.csv](https://gist.github.com/{html.escape(gist_id)})\n\n")
 
 
-    # 4.2 MLflow/DagsHub artifacts (tracking)
-    md.append("\n**b) MLflow Artifacts (tracking UI)**\n\n")
+    # ---- Section 5: MLflow Artifacts ----
+    md.append("## 5) MLflow Artifacts (tracking UI)\n\n")
     tracking_uri = str((cfg.get("mlflow") or {}).get("tracking_uri") or "").strip()
     rid = (latest.get("mlflow_run_id") or "").strip() if latest else ""
     src_tag = "this workflow run" if trained_this_run else "previous run"
@@ -484,7 +489,7 @@ def main() -> int:
     if tracking_uri and rid:
         exp_id = (latest.get("experiment_id") or "").strip() if latest else ""
         if not exp_id:
-            exp_id = "0"  # fallback
+            exp_id = "0"
         run_link = f"{tracking_uri}/#/experiments/{exp_id}/runs/{rid}"
         md.append(
             f'- MLflow run (tracking UI, {html.escape(src_tag)}): '
@@ -492,10 +497,6 @@ def main() -> int:
         )
     else:
         md.append("- MLflow run (tracking UI): Not available (missing tracking_uri or run_id)\n")
-
-
-    md.append("## 5) Commit History\n\n")
-    md.append(f"- **Commit History:** [commitHistory.csv](https://gist.github.com/{html.escape(gist_id)})\n\n")
 
     write_summary("".join(md))
     return 0
