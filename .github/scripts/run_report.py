@@ -120,6 +120,7 @@ def main():
     # 1) Detect MLflow project + cause attribution (tested)
     sh([
     "python", ".github/scripts/detect_cause_mlops.py",
+    "--config", args.config,
     "--caller-root", caller_root,
     "--sha", sha,
     "--out", detect_json
@@ -138,7 +139,7 @@ def main():
         "python", ".github/scripts/trigger_training.py",
         "--config", args.config,
         "--caller-root", caller_root,
-        "--cause", (cause if mlflow_project_detected else ""),
+        "--cause", cause,
         "--out", train_json,
     ])
 
