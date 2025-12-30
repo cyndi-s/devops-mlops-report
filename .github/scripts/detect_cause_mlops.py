@@ -169,7 +169,7 @@ def classify_cause(changed_files: list[str], script_path: str | None, data_paths
     dbg = {
         "changed_files_count": str(len(changed)),
         "script_path": normalize_repo_rel_path(script_path) if script_path else "",
-        "data_paths": ";".join(data_paths),
+        "data_paths": ";".join(data_paths or []),
         "script_hit": str(script_hit),
         "data_hit": str(data_hit),
     }
@@ -178,6 +178,7 @@ def classify_cause(changed_files: list[str], script_path: str | None, data_paths
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--config", required=True, help="Path to report-config.yml in caller repo")
     ap.add_argument("--caller-root", required=True)
     ap.add_argument("--sha", required=True)
     ap.add_argument("--out", required=True)
@@ -186,19 +187,15 @@ def main():
     caller_root = args.caller_root
     sha = args.sha
 
-    mlproject = os.path.join(caller_root, "MLproject")
-    arg2pipeline_dir = os.path.join(caller_root, "arg2pipeline")
-    pipeline_json = os.path.join(arg2pipeline_dir, "pipeline.json")
 
-    mlflow_project_detected = path_exists(mlproject) and os.path.isdir(arg2pipeline_dir)
+    # v2: MLproject is optional (auto-detection only). No arg2pipeline dependency.
+    mlproject = os.path.join(caller_root, "MLproject")
+    mlflow_project_detected = path_exists(mlproject)
 
     missing_reason = ""
-    if not path_exists(mlproject):
-        missing_reason = "MLproject file not found at repo root."
-    elif not os.path.isdir(arg2pipeline_dir):
-        missing_reason = "arg2pipeline/ directory not found."
-    elif not path_exists(pipeline_json):
-        missing_reason = "arg2pipeline/ found, but pipeline.json is missing (limited parsing)."
+    if not mlflow_project_detected:
+        missing_reason = "MLproject not found (optional in v2)."
+
 
     changed_files = get_changed_files_single_commit(caller_root, sha) if sha else []
     
@@ -228,15 +225,27 @@ def main():
         pass
 
 
-    if mlflow_project_detected:
-        script_from_mlproject = parse_mlproject_for_script(mlproject)
+    # v2: user-defined paths are primary
+    cfg = {}
+    try:
+        with open(args.config, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except Exception:
+        cfg = {}
 
-        script_from_pipeline, data_paths = (None, [])
-        if path_exists(pipeline_json):
-            script_from_pipeline, data_paths = parse_pipeline_for_script_and_data(pipeline_json)
+    project = cfg.get("project") or {}
+    user_script = (project.get("train_script") or "").strip()
+    user_data = project.get("data_paths") or []
+    if isinstance(user_data, str):
+        user_data = [user_data]
+    user_data = [str(x).strip() for x in user_data if str(x).strip()]
 
-        script_path = script_from_mlproject or script_from_pipeline
-        cause, dbg = classify_cause(changed_files, script_path, data_paths)
+    script_path = user_script or (parse_mlproject_for_script(mlproject) if mlflow_project_detected else None)
+    data_paths = user_data
+
+    cause, dbg = classify_cause(changed_files, script_path, data_paths)
+
+
 
     payload = {
         "mlflow_project_detected": mlflow_project_detected,
