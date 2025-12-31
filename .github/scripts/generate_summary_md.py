@@ -365,12 +365,7 @@ def main() -> int:
     md.append("# Pipeline Summary\n\n")
 
     # Section 1
-    if not mlflow_project_detected:
-        # 1) No badge in this scenario
-        md.append("## 1) Latest Trained Model\n\n")
-        md.append(FIXED_MLFLOW_MISSING_MSG_MD + "\n\n")
-        
-    else:
+    if True:
        # Show badge ONLY when we have any model info
         if has_any_model_info:
             md.append(f"## 1) Latest Trained Model: {badge}\n\n")
