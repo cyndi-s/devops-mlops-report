@@ -1,0 +1,21 @@
+# report-config.yml (user editable)
+version: 1
+
+# timezone (IANA format)
+# Examples: America/New_York, America/Toronto, UTC
+# If you're unsure, search: "IANA timezone for <your city>"
+timezone: "America/Toronto"
+
+repo_visibility: private  # public | private
+
+
+storage:
+  gist_url: "https://gist.github.com/<user>/<gist_id>"
+
+report:
+  highlight_metric: val_accuracy
+  trend_window: 10
+  sharp_delta: 0.15
+
+mlflow:
+  tracking_uri: "https://dagshub.com/<user>/<repo>.mlflow"
