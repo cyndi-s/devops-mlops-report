@@ -1,0 +1,13 @@
+devops-mlops-report:
+  name: DevOps-MLOps-Report (inline)
+  needs: [build-and-test]
+  if: ${{ always() }}
+  uses: cyndi-s/devops-mlops-report/.github/workflows/ci-report.yml@report-v2
+  permissions:
+    actions: read
+    contents: read
+  with:
+    config_path: report-config.yml
+  secrets:
+    GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+    DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
