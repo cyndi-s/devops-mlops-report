@@ -46,7 +46,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyyaml mlflow pandas 
+          pip install pyyaml mlflow pandas matplotlib
+          # 2) deps for caller repo training (user contract)
+          if [ -f "caller/requirements.txt" ]; then
+            echo "[deps] Installing caller/requirements.txt"
+            pip install -r caller/requirements.txt
+          else
+            echo "[deps] No caller/requirements.txt found; training may fail or be skipped, report will still run."
+          fi
+
 
      
       - name: Run devops-mlops-report
