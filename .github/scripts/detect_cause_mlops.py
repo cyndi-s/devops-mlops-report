@@ -188,13 +188,12 @@ def main():
     sha = args.sha
 
 
-    # v2: MLproject is optional (auto-detection only). No arg2pipeline dependency.
+    # v2: We may use a repo MLproject, or generate a temporary one later from user config.
     mlproject = os.path.join(caller_root, "MLproject")
-    mlflow_project_detected = path_exists(mlproject)
+    repo_mlproject_exists = path_exists(mlproject)
 
+    # v2: keep report clean (no warnings)
     missing_reason = ""
-    if not mlflow_project_detected:
-        missing_reason = "MLproject not found (optional in v2)."
 
 
     changed_files = get_changed_files_single_commit(caller_root, sha) if sha else []
@@ -216,15 +215,7 @@ def main():
     if repo_full and "/" in repo_full:
         REPO_HINTS.add(repo_full.split("/")[-1])
 
-    # hint from MLproject name if you already parse it (add if you have it)
-    # example variable name: project_name
-    try:
-        if project_name:
-            REPO_HINTS.add(project_name)
-    except Exception:
-        pass
-
-
+   
     # v2: user-defined paths are primary
     cfg = {}
     try:
@@ -240,15 +231,43 @@ def main():
         user_data = [user_data]
     user_data = [str(x).strip() for x in user_data if str(x).strip()]
 
-    script_path = user_script or (parse_mlproject_for_script(mlproject) if mlflow_project_detected else None)
+    # v2: user-defined paths are primary; otherwise best-effort parse repo MLproject (if present)
+    script_path = user_script or (parse_mlproject_for_script(mlproject) if repo_mlproject_exists else None)
     data_paths = user_data
 
-    cause, dbg = classify_cause(changed_files, script_path, data_paths)
+    # v2: minimal validation (existence only)
+    config_valid = True
+    invalid_reason = ""
+
+    if user_script:
+        if not path_exists(os.path.join(caller_root, user_script)):
+            config_valid = False
+            invalid_reason = f"train_script not found: {user_script}"
+
+    # data paths are not strictly required for cause detection; warn-only behavior is handled elsewhere
+    # (we don't invalidate training here just because a data path is missing)
+
+    # v2: treat MLproject as effectively available if repo has it OR user provided a script path
+    # (tmp MLproject will be created later if needed)
+    mlflow_project_detected = bool(repo_mlproject_exists or (user_script and config_valid))
+
+    if config_valid:
+        cause, dbg = classify_cause(changed_files, script_path, data_paths)
+    else:
+        cause = ""
+        dbg["script_path"] = user_script
+        dbg["data_paths"] = ";".join(user_data)
+        dbg["script_hit"] = "False"
+        dbg["data_hit"] = "False"
+        dbg["invalid_reason"] = invalid_reason
 
 
 
     payload = {
         "mlflow_project_detected": mlflow_project_detected,
+        "repo_mlproject_exists": repo_mlproject_exists,
+        "config_valid": config_valid if "config_valid" in locals() else True,
+        "invalid_reason": invalid_reason if "invalid_reason" in locals() else "",
         "missing_reason": missing_reason,
         "changed_files": changed_files,  # kept for debugging / future use
         "cause": cause,
