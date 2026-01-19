@@ -44,6 +44,35 @@ def load_cfg(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
+def ensure_tmp_mlproject(caller_root: str, train_script: str, train_args: list[str]) -> str:
+    """
+    v2: If caller repo has no MLproject but user provided paths, create a temporary MLproject
+    in the CI workspace so the rest of the pipeline always uses mlflow.projects.run().
+    Returns the MLproject path (in caller workspace).
+    """
+    mlproject_path = os.path.join(caller_root, "MLproject")
+    if os.path.exists(mlproject_path):
+        return mlproject_path
+
+    # Build command (do not guess flags; only use user-provided args)
+    cmd = "python " + train_script
+    if train_args:
+        cmd += " " + " ".join(train_args)
+
+    content = {
+        "name": "tmp-mlproject-from-report-config",
+        "entry_points": {
+            "main": {
+                "command": cmd
+            }
+        }
+    }
+
+    with open(mlproject_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(content, f, sort_keys=False)
+
+    print(f"[trigger_training] created tmp MLproject at {mlproject_path}")
+    return mlproject_path
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -83,23 +112,47 @@ def main() -> int:
         else:
             payload["should_train"] = True
 
-            # Best-effort: try MLflow Projects first; if unavailable, fall back to running the script directly.
+            # v2: Always run training via MLflow Projects.
+            # If MLproject is missing but user provided paths, create a temporary MLproject in the workspace.
             tracking_uri = ((cfg.get("mlflow") or {}).get("tracking_uri") or "").strip()
-            mlproject_path = os.path.join(caller_root, "MLproject")
 
-            try:
-                import mlflow  # type: ignore
+            # Minimal path validation (existence only)
+            script_abs = os.path.join(caller_root, train_script)
+            if not os.path.isfile(script_abs):
+                payload["should_train"] = False
+                payload["trained"] = False
+                payload["run_id"] = ""
+                payload["reason"] = f"invalid config: train_script not found: {train_script}"
+                print(f"[trigger_training] skip: {payload['reason']}")
+            else:
+                # normalize train_args
+                train_args = project.get("train_args") or []
+                if isinstance(train_args, str):
+                    train_args = [train_args]
+                train_args = [str(x).strip() for x in train_args if str(x).strip()]
 
-                if tracking_uri:
-                    mlflow.set_tracking_uri(tracking_uri)
+                # data paths are validated lightly (existence), but not required to include in MLproject
+                for dp in data_paths:
+                    dp_abs = os.path.join(caller_root, dp)
+                    if not os.path.exists(dp_abs):
+                        print(f"[trigger_training] warn: data_path not found: {dp}")
 
-                # If MLproject exists, we can try projects.run; otherwise skip straight to fallback.
-                if os.path.exists(mlproject_path):
+                try:
+                    import mlflow  # type: ignore
+
+                    if tracking_uri:
+                        mlflow.set_tracking_uri(tracking_uri)
+
+                    # ensure MLproject exists (real or tmp)
+                    ensure_tmp_mlproject(caller_root, train_script, train_args)
+
+                    # compat symlink helps GoMLOps templates using ../<repo_name>/...
                     compat_root = ensure_repo_name_symlink(caller_root)
+
                     submitted = mlflow.projects.run(
                         uri=compat_root,
                         entry_point="main",
-                        parameters={},          # v2: do not force param schema
+                        parameters={},   # v2: do not force param schema
                         env_manager="local",
                         synchronous=True,
                     )
@@ -108,32 +161,11 @@ def main() -> int:
                     payload["trained"] = True
                     payload["reason"] = "mlflow.projects.run ok" if run_id else "mlflow.projects.run ok (no run_id)"
                     print(f"[trigger_training] mlflow.projects.run ok, run_id={run_id or 'NA'}")
-                else:
-                    raise RuntimeError("MLproject not present; fallback to direct script execution")
 
-
-            except Exception as e:
-                # Fallback: run the user script directly (no forced conda/requirements).
-                try:
-                    import subprocess
-
-                    script_abs = os.path.join(caller_root, train_script)
-                    cmd = ["python", script_abs]
-                    # minimal, optional: pass first data path as --data if user provided any
-                    if data_paths:
-                        cmd += ["--data", os.path.join(caller_root, data_paths[0])]
-
-                    print(f"[trigger_training] fallback: running script: {' '.join(cmd)}")
-                    subprocess.check_call(cmd, cwd=caller_root)
-
-                    payload["trained"] = True
-                    payload["run_id"] = ""
-                    payload["reason"] = f"fallback script run ok (no mlflow run_id); primary error: {type(e).__name__}"
-                    print("[trigger_training] fallback ok (no mlflow run_id)")
-                except Exception as e2:
+                except Exception as e:
                     payload["trained"] = False
                     payload["run_id"] = ""
-                    payload["reason"] = f"training failed (projects+fallback): {type(e).__name__}: {e} | {type(e2).__name__}: {e2}"
+                    payload["reason"] = f"training failed (mlflow.projects.run): {type(e).__name__}: {e}"
                     print(f"[trigger_training] failed: {payload['reason']}")
 
 
