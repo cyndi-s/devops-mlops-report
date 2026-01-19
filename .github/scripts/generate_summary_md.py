@@ -14,19 +14,6 @@ from zoneinfo import ZoneInfo
 import yaml
 
 CSV_NAME_DEFAULT = "commitHistory.csv"
-FIXED_MLFLOW_MISSING_MSG_MD = """
-**MLflow project not detected**
-
-No `MLproject` file was found in this **repository root**.
-
-The `devops-mlops-report` expects an MLflow Project with MLflow runs
-(metrics and params logged to an MLflow tracking server).
-
-You can generate an `MLproject` file using the [GoMLOps](https://github.com/yorku-ease/GoMLOps) tool.
-
-After adding `MLproject` file and `arg2pipeline/` folder at the repository root, re-run this workflow.
-""".strip()
-
 
 def get_tz(cfg: dict):
     name = str(cfg.get("timezone") or "").strip()

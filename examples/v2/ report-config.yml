@@ -20,14 +20,11 @@ report:
 mlflow:
   tracking_uri: "https://dagshub.com/<user>/<repo>.mlflow"
 
-# v2 — PRIMARY: user-defined cause detection inputs
-training:
-  train_script: "src/train.py"
-  data_paths:
-    - "data/"
-    - "datasets/"
+project:
+  # v2: user-defined training entry (highest priority)
+  # If MLproject is missing, a temporary MLproject will be generated at runtime.
+  train_script: ""          # e.g. src/train.py
+  data_paths: []            # e.g. ["data/data.csv"] or ["data/Positive", "data/Negative"]
 
-# v2 — OPTIONAL: GoMLOps assistance (env + MLproject)
-gomlops:
-  enabled: false
-  conda_yaml: "conda_<repo>.yaml"
+  # Optional: pass only explicit CLI args (no guessing)
+  train_args: []            # e.g. ["--epochs", "3"]
