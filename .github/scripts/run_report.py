@@ -193,7 +193,7 @@ def main():
     metrics_kv = ""
     duration = ""
 
-    if is_trained == "true":
+    if trained and run_id:
         sh([
             "python", ".github/scripts/extract_mlflow_details.py",
             "--config", args.config,
@@ -228,7 +228,7 @@ def main():
         "mlflow_project_detected": "Yes" if mlflow_project_detected else "No",
         "is_trained": is_trained,
         "mlflow_run_id": run_id,
-        "duration": (duration if run_id else ""),
+        "duration": (duration if (trained and run_id) else ""),
         "mlflow_params_kv": params_kv,
         "mlflow_metrics_kv": metrics_kv,
         "cause": cause,
