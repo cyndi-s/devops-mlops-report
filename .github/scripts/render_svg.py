@@ -130,8 +130,7 @@ def build_svg(timestamps: List[str], vals: List[float], sharp_flags: List[bool],
 
     if sharp_x:
         ax.scatter(sharp_x, sharp_y, c="red", zorder=5)
-        
-    ax.legend(loc="best")
+
     # median line
     med = median(vals)
     ax.axhline(med, linestyle="--", label=f"Median Performance ({med:.3f})")
@@ -142,6 +141,8 @@ def build_svg(timestamps: List[str], vals: List[float], sharp_flags: List[bool],
     ma_y = [v for v in ma if v is not None]
     if ma_x:
         ax.plot(ma_x, ma_y, label="3-run MA", linewidth=2, alpha=0.7)
+    
+    ax.legend(loc="best")
 
     ax.set_title(f"Model Performance ({metric})")
     ax.set_xlabel("Run #")
