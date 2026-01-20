@@ -130,7 +130,8 @@ def build_svg(timestamps: List[str], vals: List[float], sharp_flags: List[bool],
 
     if sharp_x:
         ax.scatter(sharp_x, sharp_y, c="red", zorder=5)
-
+        
+    ax.legend(loc="best")
     # median line
     med = median(vals)
     ax.axhline(med, linestyle="--", label=f"Median Performance ({med:.3f})")
@@ -152,7 +153,7 @@ def build_svg(timestamps: List[str], vals: List[float], sharp_flags: List[bool],
     # show all ticks 1..N (N <= trend_window, usually 10)
     ax.set_xticks(xs)
 
-    ax.legend(loc="best")
+    
     fig.tight_layout()
 
     from io import StringIO as _StringIO
