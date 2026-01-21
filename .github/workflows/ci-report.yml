@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: cyndi-s/devops-mlops-report
-          ref: main
+          ref: report-v2
           path: app
 
       - name: Setup Python
