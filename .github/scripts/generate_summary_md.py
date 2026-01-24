@@ -290,6 +290,19 @@ def main() -> int:
 
     s1_ts = (latest.get("timestamp_local") if latest else "") or ""
     s1_cause = (latest.get("cause") if latest else "") or ""
+
+    # training_attempted should be about THIS commit, not the latest successful trained model
+    this_row = None
+    sha_env = (os.environ.get("GITHUB_SHA") or "").strip()
+    if sha_env:
+        for r in reversed(rows):
+            if (r.get("commit_sha") or "").strip() == sha_env:
+                this_row = r
+                break
+
+    this_cause = (this_row.get("cause") if this_row else "") or ""
+    this_run_id = (this_row.get("mlflow_run_id") if this_row else "") or ""
+    training_attempted = bool(this_cause or this_run_id)
     s1_params = (latest.get("mlflow_params_kv") if latest else "") or ""
     s1_metrics = (latest.get("mlflow_metrics_kv") if latest else "") or ""
     s1_metrics = fmt_kv_3dp(s1_metrics)
@@ -355,7 +368,10 @@ def main() -> int:
     if True:
        # Show badge ONLY when we have any model info
         if has_any_model_info:
-            md.append(f"## 1) Latest Trained Model: {badge}\n\n")
+            fail_badge = ""
+            if training_attempted and not trained_this_run:
+                fail_badge = " <strong><code>Training attempted: FAILED this run</code></strong>"
+            md.append(f"## 1) Latest Trained Model: {badge}{fail_badge}\n\n")
         else:
             md.append("## 1) Latest Trained Model\n\n")
 
@@ -385,6 +401,13 @@ def main() -> int:
             for c in cells:
                 md.append(f"<td style='text-align:center; vertical-align:middle; word-break:break-word; max-width:100%'>{c}</td>")
             md.append("</tr></tbody></table>\n\n")
+
+            if has_any_model_info and mlflow_project_detected and training_attempted and not trained_this_run:
+                md.append("**Training failure details (this run):**\n\n")
+                md.append("- **What failed:** `Training attempted: FAILED this run`\n")
+                md.append(f"- **Why it failed:** `{this_cause or 'unknown cause'}`\n")
+                md.append(f"- **Where it failed:** `Run ID: {this_run_id or 'NA'}`\n\n")
+
 
     # Section 2
     md.append(f"## 2) Model Performance ({html.escape(metric)})\n\n")
