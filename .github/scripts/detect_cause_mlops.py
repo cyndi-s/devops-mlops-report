@@ -6,6 +6,17 @@ import subprocess
 
 import yaml
 
+def _is_ignored_path(p: str) -> bool:
+    """
+    Tool-level default ignore for filesystem noise.
+    These files should never trigger ML retraining.
+    """
+    name = p.rsplit("/", 1)[-1]
+    return name in {
+        ".DS_Store",
+        "Thumbs.db",
+        "desktop.ini",
+    } or "/__MACOSX/" in p
 
 def path_exists(p: str) -> bool:
     try:
@@ -270,7 +281,12 @@ def main():
     mlflow_project_detected = bool(repo_mlproject_exists or (entry_script and config_valid))
 
     if config_valid:
-        cause, dbg = classify_cause(changed_files, script_paths, data_paths)
+        # Filter out tool-level ignored files (filesystem noise)
+        filtered_changed_files = [
+            f for f in changed_files
+            if not _is_ignored_path(f)
+        ]
+        cause, dbg = classify_cause(filtered_changed_files, script_paths, data_paths)
     else:
         cause = ""
         dbg["script_paths"] = ";".join(user_scripts)
