@@ -248,10 +248,7 @@ def main() -> int:
     # NEW: failure details captured from workflow (run_report.py)
     training_attempted = bool(dev.get("training_attempted"))
     training_failed = bool(dev.get("training_failed"))
-    training_run_id = str(dev.get("training_run_id") or "").strip()
-    training_failure_reason = str(dev.get("training_failure_reason") or "").strip()
-    if training_failure_reason and not training_failure_reason.lower().startswith("cause:"):
-        training_failure_reason = f"Cause: {training_failure_reason}"
+    
         
     # status from devops_json (fallback to env, then "Unknown")
     workflow_status = (dev.get("status") or dev.get("workflow_status") or "").strip()
@@ -299,18 +296,7 @@ def main() -> int:
     s1_ts = (latest.get("timestamp_local") if latest else "") or ""
     s1_cause = (latest.get("cause") if latest else "") or ""
 
-    # training_attempted should be about THIS commit, not the latest successful trained model
-    this_row = None
-    sha_env = (os.environ.get("GITHUB_SHA") or "").strip()
-    if sha_env:
-        for r in reversed(rows):
-            if (r.get("commit_sha") or "").strip() == sha_env:
-                this_row = r
-                break
-
-    this_cause = (this_row.get("cause") if this_row else "") or ""
-    this_run_id = (this_row.get("mlflow_run_id") if this_row else "") or ""
-    training_attempted = bool(this_cause or this_run_id)
+   
     s1_params = (latest.get("mlflow_params_kv") if latest else "") or ""
     s1_metrics = (latest.get("mlflow_metrics_kv") if latest else "") or ""
     s1_metrics = fmt_kv_3dp(s1_metrics)
@@ -388,10 +374,10 @@ def main() -> int:
             md.append("_No trained model found in commitHistory.csv yet._\n\n")
             # Show failure details even when there is no successful trained model yet
             if mlflow_project_detected and training_failed:
-                md.append("**Training failure details (this run):**\n\n")
-                md.append("- **What failed:** `Training attempted: FAILED this run`\n")
-                md.append(f"- **Why it failed:** `{training_failure_reason or 'Cause: unknown'}`\n")
-                md.append(f"- **Where it failed:** `Run ID: {training_run_id or 'NA'}`\n\n")
+                md.append("**New model training was triggered, but it failed.**\n\n")
+                if run_url:
+                    md.append(f"- Open the workflow run: {run_url}\n")
+                md.append("- In GitHub Actions: open the **devops-mlops-report** job → expand **Run devops-mlops-report** (and any red failed step).\n\n")
         else:
             md.append("<table style='width:100%; text-align:center;'>")
             md.append("<thead><tr>"
@@ -418,11 +404,10 @@ def main() -> int:
             md.append("</tr></tbody></table>\n\n")
 
             if mlflow_project_detected and training_failed:
-                md.append("**Training failure details (this run):**\n\n")
-                md.append("- **What failed:** `Training attempted: FAILED this run`\n")
-                md.append(f"- **Why it failed:** `{training_failure_reason or 'Cause: unknown'}`\n")
-                md.append(f"- **Where it failed:** `Run ID: {training_run_id or 'NA'}`\n\n")
-
+                md.append("**New model training was triggered, but it failed.**\n\n")
+                if run_url:
+                    md.append(f"- Open the workflow run: {run_url}\n")
+                md.append("- In GitHub Actions: open the **devops-mlops-report** job → expand **Run devops-mlops-report** (and any red failed step).\n\n")
 
     # Section 2
     md.append(f"## 2) Model Performance ({html.escape(metric)})\n\n")
