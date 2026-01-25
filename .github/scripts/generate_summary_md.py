@@ -245,6 +245,14 @@ def main() -> int:
     with open(args.devops_json, "r", encoding="utf-8") as f:
         dev = json.load(f) or {}
     mlflow_project_detected = str(dev.get("mlflow_project_detected", "")).lower() in ("yes", "true", "1")
+    # NEW: failure details captured from workflow (run_report.py)
+    training_attempted = bool(dev.get("training_attempted"))
+    training_failed = bool(dev.get("training_failed"))
+    training_run_id = str(dev.get("training_run_id") or "").strip()
+    training_failure_reason = str(dev.get("training_failure_reason") or "").strip()
+    if training_failure_reason and not training_failure_reason.lower().startswith("cause:"):
+        training_failure_reason = f"Cause: {training_failure_reason}"
+        
     # status from devops_json (fallback to env, then "Unknown")
     workflow_status = (dev.get("status") or dev.get("workflow_status") or "").strip()
     if not workflow_status:
@@ -366,17 +374,24 @@ def main() -> int:
 
     # Section 1
     if True:
-       # Show badge ONLY when we have any model info
+        # Show badge; add FAILED badge when this run attempted training but failed (from devops_json)
+        fail_badge = ""
+        if mlflow_project_detected and training_failed:
+            fail_badge = " <strong><code>Training attempted: FAILED this run</code></strong>"
+
         if has_any_model_info:
-            fail_badge = ""
-            if training_attempted and not trained_this_run:
-                fail_badge = " <strong><code>Training attempted: FAILED this run</code></strong>"
             md.append(f"## 1) Latest Trained Model: {badge}{fail_badge}\n\n")
         else:
-            md.append("## 1) Latest Trained Model\n\n")
+            md.append(f"## 1) Latest Trained Model{fail_badge}\n\n")
 
         if not latest:
             md.append("_No trained model found in commitHistory.csv yet._\n\n")
+            # Show failure details even when there is no successful trained model yet
+            if mlflow_project_detected and training_failed:
+                md.append("**Training failure details (this run):**\n\n")
+                md.append("- **What failed:** `Training attempted: FAILED this run`\n")
+                md.append(f"- **Why it failed:** `{training_failure_reason or 'Cause: unknown'}`\n")
+                md.append(f"- **Where it failed:** `Run ID: {training_run_id or 'NA'}`\n\n")
         else:
             md.append("<table style='width:100%; text-align:center;'>")
             md.append("<thead><tr>"
@@ -402,11 +417,11 @@ def main() -> int:
                 md.append(f"<td style='text-align:center; vertical-align:middle; word-break:break-word; max-width:100%'>{c}</td>")
             md.append("</tr></tbody></table>\n\n")
 
-            if has_any_model_info and mlflow_project_detected and training_attempted and not trained_this_run:
+            if mlflow_project_detected and training_failed:
                 md.append("**Training failure details (this run):**\n\n")
                 md.append("- **What failed:** `Training attempted: FAILED this run`\n")
-                md.append(f"- **Why it failed:** `{this_cause or 'unknown cause'}`\n")
-                md.append(f"- **Where it failed:** `Run ID: {this_run_id or 'NA'}`\n\n")
+                md.append(f"- **Why it failed:** `{training_failure_reason or 'Cause: unknown'}`\n")
+                md.append(f"- **Where it failed:** `Run ID: {training_run_id or 'NA'}`\n\n")
 
 
     # Section 2

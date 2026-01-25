@@ -155,6 +155,11 @@ def main():
 
     
     # 2) Prepare DevOps payload for summary (tested format)
+    # training attempt/failure details (from trigger_training.py output)
+    training_reason = (tr.get("reason") or "").strip()
+    training_attempted = bool(run_id or trained or training_reason)
+    training_failed = bool(training_attempted and not trained)
+
     devops_payload = {
         "branch": branch,
         "author": actor,
@@ -165,6 +170,11 @@ def main():
         "status": status,
         "finished_at": finished_at,
         "mlflow_project_detected": mlflow_project_detected,
+         # NEW: used by generate_summary_md.py to show failure details
+        "training_attempted": training_attempted,
+        "training_failed": training_failed,
+        "training_run_id": run_id,
+        "training_failure_reason": training_reason,
     }
     with open(devops_json, "w", encoding="utf-8") as f:
         json.dump(devops_payload, f, indent=2)

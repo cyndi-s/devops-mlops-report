@@ -10,7 +10,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-    uses: cyndi-s/devops-mlops-report/.github/workflows/ci-report.yml@report-v2
+    uses: cyndi-s/devops-mlops-report/.github/workflows/ci-report.yml@main
     with:
       config_path: report-config.yml
     secrets:
