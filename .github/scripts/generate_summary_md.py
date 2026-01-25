@@ -375,9 +375,9 @@ def main() -> int:
             # Show failure details even when there is no successful trained model yet
             if mlflow_project_detected and training_failed:
                 md.append("**New model training was triggered, but it failed.**\n\n")
-                if run_url:
-                    md.append(f"- Open the workflow run: {run_url}\n")
-                md.append("- In GitHub Actions: open the **devops-mlops-report** job → expand **Run devops-mlops-report** (and any red failed step).\n\n")
+                md.append("- On this workflow run page: in the left sidebar, click **DevOps-MLOps-Report (inline) / report**.\n")
+                md.append("- Then expand the step **Run devops-mlops-report** to see the failure output (the job can still be green).\n\n")
+
         else:
             md.append("<table style='width:100%; text-align:center;'>")
             md.append("<thead><tr>"
@@ -405,9 +405,8 @@ def main() -> int:
 
             if mlflow_project_detected and training_failed:
                 md.append("**New model training was triggered, but it failed.**\n\n")
-                if run_url:
-                    md.append(f"- Open the workflow run: {run_url}\n")
-                md.append("- In GitHub Actions: open the **devops-mlops-report** job → expand **Run devops-mlops-report** (and any red failed step).\n\n")
+                md.append("- On this workflow run page: in the left sidebar, click **DevOps-MLOps-Report (inline) / report**.\n")
+                md.append("- Then expand the step **Run devops-mlops-report** to see the failure output (the job can still be green).\n\n")
 
     # Section 2
     md.append(f"## 2) Model Performance ({html.escape(metric)})\n\n")
