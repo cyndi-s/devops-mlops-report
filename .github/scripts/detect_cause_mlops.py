@@ -133,29 +133,30 @@ def normalize_repo_rel_path(p: str, repo_hints: set[str] | None = None) -> str:
     return p
 
 
-def classify_cause(changed_files: list[str], script_path: str | None, data_paths: list[str]) -> tuple[str, dict]:
+def classify_cause(changed_files: list[str], script_paths: list[str], data_paths: list[str]) -> tuple[str, dict]:
     changed = [normalize_repo_rel_path(f, REPO_HINTS) for f in changed_files]
     script_hit = False
     data_hit = False
 
-    script_prefixes: list[str] = []
-    if script_path:
-        sp = normalize_repo_rel_path(script_path,REPO_HINTS)
-        script_prefixes.append(sp)
-        if "/" in sp:
-            script_prefixes.append(sp.rsplit("/", 1)[0] + "/")
+    # Script triggers: exact file match only (no directory semantics)
+    script_targets = [
+        normalize_repo_rel_path(sp, REPO_HINTS).rstrip("/")
+        for sp in (script_paths or [])
+        if sp
+    ]
 
-    # normalize data paths once
-    norm_data_paths = [normalize_repo_rel_path(dp, REPO_HINTS).rstrip("/") for dp in (data_paths or []) if dp]
+    # Data triggers: file OR directory semantics
+    norm_data_paths = [
+        normalize_repo_rel_path(dp, REPO_HINTS).rstrip("/") 
+        for dp in (data_paths or []) 
+        if dp]
 
     for f in changed:
-        if any(f == p or f.startswith(p) for p in script_prefixes):
+        if any(f == p for p in script_targets):
             script_hit = True
 
         if any(f == dp or f.startswith(dp + "/") for dp in norm_data_paths if dp):
             data_hit = True
-
-
 
     if script_hit and data_hit:
         cause = "Both"
@@ -168,7 +169,7 @@ def classify_cause(changed_files: list[str], script_path: str | None, data_paths
 
     dbg = {
         "changed_files_count": str(len(changed)),
-        "script_path": normalize_repo_rel_path(script_path) if script_path else "",
+        "script_paths": ";".join(script_targets),
         "data_paths": ";".join(data_paths or []),
         "script_hit": str(script_hit),
         "data_hit": str(data_hit),
@@ -225,37 +226,54 @@ def main():
         cfg = {}
 
     project = cfg.get("project") or {}
-    user_script = (project.get("train_script") or "").strip()
+     # train_script can be str or list[str]
+    ts = project.get("train_script") or []
+    if isinstance(ts, str):
+        user_scripts = [ts]
+    elif isinstance(ts, list):
+        user_scripts = ts
+    else:
+        user_scripts = []
+    user_scripts = [str(x).strip() for x in user_scripts if str(x).strip()]
+
+    # convention: first train_script is the execution entry
+    user_entry_script = user_scripts[0] if user_scripts else ""
+
     user_data = project.get("data_paths") or []
     if isinstance(user_data, str):
         user_data = [user_data]
     user_data = [str(x).strip() for x in user_data if str(x).strip()]
 
     # v2: user-defined paths are primary; otherwise best-effort parse repo MLproject (if present)
-    script_path = user_script or (parse_mlproject_for_script(mlproject) if repo_mlproject_exists else None)
+        # v2: user-defined scripts are primary; otherwise best-effort parse repo MLproject (if present)
+    parsed_script = parse_mlproject_for_script(mlproject) if repo_mlproject_exists else None
+
+    script_paths = user_scripts if user_scripts else ([parsed_script] if parsed_script else [])
+    entry_script = user_entry_script or (parsed_script or "")
+
     data_paths = user_data
 
-    # v2: minimal validation (existence only)
+    # v2: minimal validation (existence only) — validate entry script only
     config_valid = True
     invalid_reason = ""
 
-    if user_script:
-        if not path_exists(os.path.join(caller_root, user_script)):
+    if entry_script:
+        if not path_exists(os.path.join(caller_root, entry_script)):
             config_valid = False
-            invalid_reason = f"train_script not found: {user_script}"
+            invalid_reason = f"train_script not found: {entry_script}"
 
     # data paths are not strictly required for cause detection; warn-only behavior is handled elsewhere
     # (we don't invalidate training here just because a data path is missing)
 
     # v2: treat MLproject as effectively available if repo has it OR user provided a script path
     # (tmp MLproject will be created later if needed)
-    mlflow_project_detected = bool(repo_mlproject_exists or (user_script and config_valid))
+    mlflow_project_detected = bool(repo_mlproject_exists or (entry_script and config_valid))
 
     if config_valid:
-        cause, dbg = classify_cause(changed_files, script_path, data_paths)
+        cause, dbg = classify_cause(changed_files, script_paths, data_paths)
     else:
         cause = ""
-        dbg["script_path"] = user_script
+        dbg["script_paths"] = ";".join(user_scripts)
         dbg["data_paths"] = ";".join(user_data)
         dbg["script_hit"] = "False"
         dbg["data_hit"] = "False"

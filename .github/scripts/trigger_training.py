@@ -99,7 +99,19 @@ def main() -> int:
     else:
         cfg = load_cfg(args.config)
         project = cfg.get("project") or {}
-        train_script = (project.get("train_script") or "").strip()
+
+         # train_script can be str or list[str]
+        ts = project.get("train_script") or []
+        if isinstance(ts, str):
+            train_scripts = [ts]
+        elif isinstance(ts, list):
+            train_scripts = ts
+        else:
+            train_scripts = []
+        train_scripts = [str(x).strip() for x in train_scripts if str(x).strip()]
+
+        # convention: first script is the execution entry
+        train_script = train_scripts[0] if train_scripts else ""
         data_paths = project.get("data_paths") or []
         if isinstance(data_paths, str):
             data_paths = [data_paths]

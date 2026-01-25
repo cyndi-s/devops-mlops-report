@@ -156,7 +156,13 @@ def main():
     
     # 2) Prepare DevOps payload for summary (tested format)
     training_reason = (tr.get("reason") or "").strip()
-    training_attempted = bool(tr.get("should_train"))  # true only when training is supposed to run
+    st = tr.get("should_train")
+
+    # Robust parsing: trigger_training.py might return a bool OR a string ("true"/"false")
+    if isinstance(st, bool):
+        training_attempted = st
+    else:
+        training_attempted = str(st).strip().lower() == "true"
     training_failed = bool(training_attempted and not trained)
 
     devops_payload = {
