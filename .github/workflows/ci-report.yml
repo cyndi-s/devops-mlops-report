@@ -43,11 +43,108 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install dependencies (Python + optional system deps)
         run: |
           python -m pip install --upgrade pip
-          pip install pyyaml mlflow pandas matplotlib
-          # 2) deps for caller repo training (user contract)
+
+          # We need PyYAML to read report-config.yml
+          pip install pyyaml
+
+          echo "[sysdeps] Checking optional system_deps in caller/${{ inputs.config_path }}"
+
+          python - << 'PY'
+          import os
+          import yaml
+
+          cfg_path = os.path.join("caller", os.environ.get("CONFIG_PATH", "").strip() or "${{ inputs.config_path }}")
+          try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+              cfg = yaml.safe_load(f) or {}
+          except Exception as e:
+            print(f"::warning::[sysdeps] Could not read config at {cfg_path}: {e}")
+            cfg = {}
+
+          project = cfg.get("project") or {}
+          sysdeps = project.get("system_deps") or []
+          if isinstance(sysdeps, str):
+            sysdeps = [sysdeps]
+          sysdeps = [str(x).strip() for x in sysdeps if str(x).strip()]
+
+          # Allowlist mapping: friendly names -> apt packages
+          allow = {
+            "graphviz": ["graphviz"],
+            "ffmpeg": ["ffmpeg"],
+            "opencv_runtime": ["libgl1", "libsm6", "libxext6", "libxrender1"],
+            "poppler_utils": ["poppler-utils"],
+            "tesseract": ["tesseract-ocr"],
+            "build_essential": ["build-essential", "pkg-config"],
+          }
+
+          pkgs = []
+          unsupported = []
+          for dep in sysdeps:
+            if dep in allow:
+              pkgs.extend(allow[dep])
+            else:
+              unsupported.append(dep)
+
+          # de-dup while preserving order
+          seen = set()
+          pkgs2 = []
+          for p in pkgs:
+            if p not in seen:
+              pkgs2.append(p); seen.add(p)
+
+          # Write outputs for bash
+          print("SYSDEPS_PKGS=" + " ".join(pkgs2))
+          if unsupported:
+            print("::warning::[sysdeps] Unsupported system_deps requested (ignored): " + ", ".join(unsupported))
+          PY
+
+          SYSDEPS_PKGS="$(python - << 'PY'
+          import os, yaml
+          cfg_path = os.path.join("caller", os.environ.get("CONFIG_PATH", "").strip() or "${{ inputs.config_path }}")
+          try:
+            cfg = yaml.safe_load(open(cfg_path, "r", encoding="utf-8")) or {}
+          except Exception:
+            cfg = {}
+          project = cfg.get("project") or {}
+          sysdeps = project.get("system_deps") or []
+          if isinstance(sysdeps, str):
+            sysdeps = [sysdeps]
+          sysdeps = [str(x).strip() for x in sysdeps if str(x).strip()]
+          allow = {
+            "graphviz": ["graphviz"],
+            "ffmpeg": ["ffmpeg"],
+            "opencv_runtime": ["libgl1", "libsm6", "libxext6", "libxrender1"],
+            "poppler_utils": ["poppler-utils"],
+            "tesseract": ["tesseract-ocr"],
+            "build_essential": ["build-essential", "pkg-config"],
+          }
+          pkgs=[]
+          for dep in sysdeps:
+            pkgs += allow.get(dep, [])
+          seen=set(); out=[]
+          for p in pkgs:
+            if p not in seen:
+              out.append(p); seen.add(p)
+          print(" ".join(out))
+          PY
+          )"
+
+          if [ -n "$SYSDEPS_PKGS" ]; then
+            echo "[sysdeps] Installing: $SYSDEPS_PKGS"
+            sudo apt-get update -y
+            # Best-effort: warn + continue if install fails
+            sudo apt-get install -y $SYSDEPS_PKGS || echo "::warning::[sysdeps] apt-get install failed for: $SYSDEPS_PKGS (continuing)"
+          else
+            echo "[sysdeps] No system_deps requested."
+          fi
+
+          # Install tool Python deps
+          pip install mlflow pandas matplotlib
+
+          # Caller Python deps (user contract)
           if [ -f "caller/requirements.txt" ]; then
             echo "[deps] Installing caller/requirements.txt"
             pip install -r caller/requirements.txt
@@ -55,8 +152,6 @@ jobs:
             echo "[deps] No caller/requirements.txt found; training may fail or be skipped, report will still run."
           fi
 
-
-     
       - name: Run devops-mlops-report
         working-directory: app
         env:

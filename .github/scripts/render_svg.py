@@ -12,6 +12,7 @@ import yaml
 import matplotlib.pyplot as plt
 
 
+
 CSV_NAME_DEFAULT = "commitHistory.csv"
 
 
