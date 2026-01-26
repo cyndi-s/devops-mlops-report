@@ -25,14 +25,13 @@ project:
   # If MLproject is missing, a temporary MLproject will be generated at runtime.
   train_script: ""          # e.g. src/train.py
   data_paths: []            # e.g. ["data/data.csv"] or ["data/Positive", "data/Negative"]
-
-# NEW (optional): system-level dependencies for GitHub Actions runner
+# optional: system-level dependencies for GitHub Actions runner
   # - This is for apt-get install (binaries/libs), NOT Python pip deps.
   # - Only allowlisted values will be installed by devops-mlops-report.
   # - If missing/unsupported, the tool should warn + continue (best-effort).
-system_deps:
-  # - graphviz        # provides `dot` binary (for diagrams)
-  # - ffmpeg
-  # - opencv_runtime
-  # - poppler_utils
-  # - tesseract
+  system_deps:
+    # - graphviz        # provides `dot` binary (for diagrams)
+    # - ffmpeg
+    # - opencv_runtime
+    # - poppler_utils
+    # - tesseract
