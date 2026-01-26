@@ -44,18 +44,18 @@ def load_cfg(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
-def ensure_tmp_mlproject(caller_root: str, train_script: str, train_args: list[str]) -> str:
+def ensure_tmp_mlproject(project_root: str, script_basename: str, train_args: list[str]) -> str:
     """
-    v2: If caller repo has no MLproject but user provided paths, create a temporary MLproject
-    in the CI workspace so the rest of the pipeline always uses mlflow.projects.run().
-    Returns the MLproject path (in caller workspace).
+     v2: Create a temporary MLproject in the *script directory* so relative paths in user
+    training code (e.g., '../data') resolve as expected.
+    Returns the MLproject path (in that script directory).
     """
-    mlproject_path = os.path.join(caller_root, "MLproject")
+    mlproject_path = os.path.join(project_root, "MLproject")
     if os.path.exists(mlproject_path):
         return mlproject_path
 
-    # Build command (do not guess flags; only use user-provided args)
-    cmd = "python " + train_script
+    # Build command (run from script dir)
+    cmd = "python " + script_basename
     if train_args:
         cmd += " " + " ".join(train_args)
 
@@ -155,19 +155,26 @@ def main() -> int:
                     if tracking_uri:
                         mlflow.set_tracking_uri(tracking_uri)
 
-                    # ensure MLproject exists (real or tmp)
-                    ensure_tmp_mlproject(caller_root, train_script, train_args)
-
                     # compat symlink helps GoMLOps templates using ../<repo_name>/...
                     compat_root = ensure_repo_name_symlink(caller_root)
+                    # Run training from the script directory so user relative paths work
+                    script_dir_rel = os.path.dirname(train_script).strip("/")
+                    script_base = os.path.basename(train_script)
+
+                    uri = os.path.join(compat_root, script_dir_rel) if script_dir_rel else compat_root
+                    project_root = os.path.join(caller_root, script_dir_rel) if script_dir_rel else caller_root
+
+                    # ensure MLproject exists in the script directory (real or tmp)
+                    ensure_tmp_mlproject(project_root, script_base, train_args)
 
                     submitted = mlflow.projects.run(
-                        uri=compat_root,
+                        uri=uri,
                         entry_point="main",
                         parameters={},   # v2: do not force param schema
                         env_manager="local",
                         synchronous=True,
                     )
+
                     run_id = getattr(submitted, "run_id", "") or ""
                     payload["run_id"] = run_id
                     payload["trained"] = True
