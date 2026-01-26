@@ -3,7 +3,6 @@ import json
 import os
 import sys
 from typing import Any, Dict
-
 import yaml
 
 def ensure_repo_name_symlink(caller_root: str) -> str:
@@ -167,19 +166,16 @@ def main() -> int:
                     # ensure MLproject exists in the script directory (real or tmp)
                     ensure_tmp_mlproject(project_root, script_base, train_args)
 
-                    submitted = mlflow.projects.run(
-                        uri=uri,
-                        entry_point="main",
-                        parameters={},   # v2: do not force param schema
-                        env_manager="local",
-                        synchronous=True,
-                    )
+                    from subprocess import check_call
+                    with mlflow.start_run() as run:
+                        cmd = ["python", script_base] + train_args
+                        check_call(cmd, cwd=project_root)
 
-                    run_id = getattr(submitted, "run_id", "") or ""
-                    payload["run_id"] = run_id
-                    payload["trained"] = True
-                    payload["reason"] = "mlflow.projects.run ok" if run_id else "mlflow.projects.run ok (no run_id)"
-                    print(f"[trigger_training] mlflow.projects.run ok, run_id={run_id or 'NA'}")
+                        payload["run_id"] = run.info.run_id
+                        payload["trained"] = True
+                        payload["reason"] = "python training script executed directly via mlflow.start_run"
+                        print(f"[trigger_training] training ok, run_id={run.info.run_id}")
+
 
                 except Exception as e:
                     payload["trained"] = False
