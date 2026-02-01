@@ -5,6 +5,54 @@ import sys
 from typing import Any, Dict
 import yaml
 
+def find_run_by_short_sha(tracking_uri: str, short_sha: str) -> tuple[str, str]:
+    """
+    Find the MLflow run whose git commit tag starts with short_sha (first 7 of GITHUB_SHA).
+    Prefer the run that has metrics/params (real training run).
+    Returns (run_id, experiment_id) or ("","") if not found.
+    """
+    try:
+        import mlflow  # type: ignore
+        from mlflow.tracking import MlflowClient  # type: ignore
+
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+
+        client = MlflowClient()
+
+        exps = client.search_experiments()
+        exp_ids = [e.experiment_id for e in exps] or ["0"]
+
+        # mlflow tag key is usually: mlflow.source.git.commit
+        # Filter for prefix match using LIKE.
+        filt = f"tags.`mlflow.source.git.commit` LIKE '{short_sha}%'"
+
+        best = None
+        best_score = -1
+
+        for exp_id in exp_ids:
+            runs = client.search_runs(
+                experiment_ids=[exp_id],
+                filter_string=filt,
+                order_by=["attributes.start_time DESC"],
+                max_results=50,
+            )
+            for r in runs:
+                metrics_n = len(getattr(r.data, "metrics", {}) or {})
+                params_n = len(getattr(r.data, "params", {}) or {})
+                score = metrics_n * 100 + params_n * 10  # metrics > params
+
+                if score > best_score:
+                    best = r
+                    best_score = score
+
+        if best:
+            return best.info.run_id, best.info.experiment_id
+
+        return "", ""
+    except Exception:
+        return "", ""
+
 def ensure_repo_name_symlink(caller_root: str) -> str:
     """
     Some MLproject templates use paths like ../<repo_name>/src/train.py.
@@ -190,15 +238,19 @@ def main() -> int:
 
                     # Ensure MLproject exists in the execution root (real or tmp)
                     ensure_tmp_mlproject(project_root, script_rel_for_cmd, train_args)
-                    from subprocess import check_call
-                    with mlflow.start_run() as run:
-                        cmd = ["python", script_rel_for_cmd] + train_args
-                        check_call(cmd, cwd=project_root)
 
-                        payload["run_id"] = run.info.run_id
-                        payload["trained"] = True
-                        payload["reason"] = "python training script executed directly via mlflow.start_run"
-                        print(f"[trigger_training] training ok, run_id={run.info.run_id}")
+                    from subprocess import check_call
+                    cmd = ["python", script_rel_for_cmd] + train_args
+                    check_call(cmd, cwd=project_root)
+                    # Match MLflow run by commit (first 7 chars of GITHUB_SHA)
+                    full_sha = (os.environ.get("GITHUB_SHA") or "").strip()
+                    short_sha = full_sha[:7] if len(full_sha) >= 7 else full_sha
+                    rid, exp_id = find_run_by_short_sha(tracking_uri, short_sha)
+
+                    payload["run_id"] = rid
+                    payload["trained"] = True if rid else False
+                    payload["reason"] = f"training executed; mlflow run selected by commit tag prefix: {short_sha}"
+                    print(f"[trigger_training] training ok, run_id={rid or '(missing)'}")
 
 
                 except Exception as e:
