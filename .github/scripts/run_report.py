@@ -81,6 +81,8 @@ def main():
     with open(args.config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
     gist_url = cfg["storage"]["gist_url"]
+    project_cfg = cfg.get("project") or {}
+    project_workdir = str(project_cfg.get("workdir") or "").strip()
 
     # Context
     caller_root = os.path.abspath(os.path.join(os.getcwd(), args.caller_root))
@@ -177,6 +179,7 @@ def main():
         "mlflow_project_detected": mlflow_project_detected,
         "training_attempted": training_attempted,
         "training_failed": training_failed,
+        "project_workdir": project_workdir,
     }
     with open(devops_json, "w", encoding="utf-8") as f:
         json.dump(devops_payload, f, indent=2)

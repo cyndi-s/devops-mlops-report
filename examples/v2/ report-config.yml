@@ -23,6 +23,7 @@ mlflow:
 project:
   # v2: user-defined training entry (highest priority)
   # If MLproject is missing, a temporary MLproject will be generated at runtime.
+  workdir: # POC-Image-Classification
   train_script: ""          # e.g. src/train.py
   data_paths: []            # e.g. ["data/data.csv"] or ["data/Positive", "data/Negative"]
 # optional: system-level dependencies for GitHub Actions runner
@@ -30,7 +31,7 @@ project:
   # - Only allowlisted values will be installed by devops-mlops-report.
   # - If missing/unsupported, the tool should warn + continue (best-effort).
   system_deps:
-    # - graphviz        # provides `dot` binary (for diagrams)
+    - graphviz        # provides `dot` binary (for diagrams)
     # - ffmpeg
     # - opencv_runtime
     # - poppler_utils

@@ -43,18 +43,19 @@ def load_cfg(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
-def ensure_tmp_mlproject(project_root: str, script_basename: str, train_args: list[str]) -> str:
+def ensure_tmp_mlproject(project_root: str, script_relpath: str, train_args: list[str]) -> str:
     """
-     v2: Create a temporary MLproject in the *script directory* so relative paths in user
-    training code (e.g., '../data') resolve as expected.
-    Returns the MLproject path (in that script directory).
+     v2: Create a temporary MLproject in the *execution root* so user code that relies on
+    relative paths (e.g., 'data/', 'models/') works as expected.
+
+    - project_root: the directory we will run MLflow Projects from (cwd)
+    - script_relpath: path to the training script *relative to project_root*
     """
     mlproject_path = os.path.join(project_root, "MLproject")
     if os.path.exists(mlproject_path):
         return mlproject_path
 
-    # Build command (run from script dir)
-    cmd = "python " + script_basename
+    cmd = "python " + script_relpath
     if train_args:
         cmd += " " + " ".join(train_args)
 
@@ -156,16 +157,39 @@ def main() -> int:
 
                     # compat symlink helps GoMLOps templates using ../<repo_name>/...
                     compat_root = ensure_repo_name_symlink(caller_root)
-                    # Run training from the script directory so user relative paths work
+                    workdir = (project.get("workdir") or "").strip().strip("/")
                     script_dir_rel = os.path.dirname(train_script).strip("/")
-                    script_base = os.path.basename(train_script)
+                    run_root_rel = script_dir_rel
+                    run_root_abs = os.path.join(caller_root, run_root_rel) if run_root_rel else caller_root
+                    # If workdir is provided and valid, prefer it as the execution root
+                    if workdir:
+                        candidate_abs = os.path.join(caller_root, workdir)
+                        if os.path.isdir(candidate_abs):
+                            # Only use workdir if train_script is inside it (so we can compute a clean relative path)
+                            script_abs = os.path.join(caller_root, train_script)
+                            try:
+                                rel_to_workdir = os.path.relpath(script_abs, candidate_abs)
+                            except ValueError:
+                                rel_to_workdir = ""
 
-                    uri = os.path.join(compat_root, script_dir_rel) if script_dir_rel else compat_root
-                    project_root = os.path.join(caller_root, script_dir_rel) if script_dir_rel else caller_root
+                            if rel_to_workdir and not rel_to_workdir.startswith(".."):
+                                run_root_rel = workdir
+                                run_root_abs = candidate_abs
+                            else:
+                                print(f"[trigger_training] warn: workdir '{workdir}' does not contain train_script '{train_script}'. Ignoring workdir.")
+                        else:
+                            print(f"[trigger_training] warn: workdir not found: {workdir}. Ignoring workdir.")
 
-                    # ensure MLproject exists in the script directory (real or tmp)
-                    ensure_tmp_mlproject(project_root, script_base, train_args)
+                    # Build MLflow project URI + local path using the chosen execution root
+                    uri = os.path.join(compat_root, run_root_rel) if run_root_rel else compat_root
+                    project_root = run_root_abs
 
+                    # Compute script path relative to execution root (what goes into MLproject command)
+                    script_abs = os.path.join(caller_root, train_script)
+                    script_rel_for_cmd = os.path.relpath(script_abs, project_root)
+
+                    # Ensure MLproject exists in the execution root (real or tmp)
+                    ensure_tmp_mlproject(project_root, script_rel_for_cmd, train_args)
                     from subprocess import check_call
                     with mlflow.start_run() as run:
                         cmd = ["python", script_base] + train_args

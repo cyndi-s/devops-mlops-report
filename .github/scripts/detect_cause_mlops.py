@@ -217,6 +217,7 @@ def main():
         "data_paths": "",
         "script_hit": "",
         "data_hit": "",
+        "workdir": workdir,
     }
 
     global REPO_HINTS
@@ -237,6 +238,7 @@ def main():
         cfg = {}
 
     project = cfg.get("project") or {}
+    workdir = str(project.get("workdir") or "").strip()
      # train_script can be str or list[str]
     ts = project.get("train_script") or []
     if isinstance(ts, str):
