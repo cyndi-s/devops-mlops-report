@@ -1,6 +1,18 @@
 devops-mlops-report:
   name: DevOps-MLOps-Report (inline)
-  needs: [build-and-test]
+  # IMPORTANT:
+  # Replace `YOUR_MAIN_JOB_ID` with the job id you want this report to summarize.
+  # This must match a key under `jobs:` in YOUR workflow (not the job's display name).
+  #
+  # Examples:
+  #   jobs:
+  #     run-tests:
+  #     train:
+  #
+  # Then set:
+  #   needs: [run-tests]
+  #
+  needs: [YOUR_MAIN_JOB_ID]
   if: ${{ always() }}
   uses: cyndi-s/devops-mlops-report/.github/workflows/ci-report.yml@report-v2
   permissions:

@@ -1,0 +1,15 @@
+# Example requirements.txt for devops-mlops-report
+# Include ONLY external packages required by your training script.
+# Core libraries like mlflow, pandas, matplotlib are already installed by the CI.
+
+# Common numerical / ML utilities
+numpy
+scikit-learn
+
+# If using PyTorch-based training
+torch
+
+# If using Hugging Face / Accelerate examples
+accelerate
+transformers
+datasets

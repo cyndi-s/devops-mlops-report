@@ -486,7 +486,7 @@ def main() -> int:
 
     # ---- Section 5: MLflow Artifacts ----
     md.append("## 5) MLflow Artifacts (tracking UI)\n\n")
-    tracking_uri = str((cfg.get("mlflow") or {}).get("tracking_uri") or "").strip()
+    tracking_uri = str((cfg.get("mlflow") or {}).get("tracking_uri") or "").strip().rstrip("/")
     rid = (latest.get("mlflow_run_id") or "").strip() if latest else ""
     src_tag = "this workflow run" if trained_this_run else "previous run"
 
