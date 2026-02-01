@@ -192,7 +192,7 @@ def main() -> int:
                     ensure_tmp_mlproject(project_root, script_rel_for_cmd, train_args)
                     from subprocess import check_call
                     with mlflow.start_run() as run:
-                        cmd = ["python", script_base] + train_args
+                        cmd = ["python", script_rel_for_cmd] + train_args
                         check_call(cmd, cwd=project_root)
 
                         payload["run_id"] = run.info.run_id
