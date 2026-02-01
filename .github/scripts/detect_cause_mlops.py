@@ -211,6 +211,7 @@ def main():
     changed_files = get_changed_files_single_commit(caller_root, sha) if sha else []
     
     cause = ""
+    workdir = ""
     dbg = {
         "changed_files_count": str(len(changed_files)),
         "script_path": "",
@@ -238,7 +239,8 @@ def main():
         cfg = {}
 
     project = cfg.get("project") or {}
-    workdir = str(project.get("workdir") or "").strip()
+    workdir = str(project.get("workdir") or "").strip().strip("/")
+    dbg["workdir"] = workdir
      # train_script can be str or list[str]
     ts = project.get("train_script") or []
     if isinstance(ts, str):
@@ -289,6 +291,7 @@ def main():
             if not _is_ignored_path(f)
         ]
         cause, dbg = classify_cause(filtered_changed_files, script_paths, data_paths)
+        dbg["workdir"] = workdir
     else:
         cause = ""
         dbg["script_paths"] = ";".join(user_scripts)
@@ -296,6 +299,7 @@ def main():
         dbg["script_hit"] = "False"
         dbg["data_hit"] = "False"
         dbg["invalid_reason"] = invalid_reason
+        dbg["workdir"] = workdir
 
 
 
